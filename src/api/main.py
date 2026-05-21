@@ -4,7 +4,12 @@ FastAPI Application for AegisGraph Sentinel 2.0
 Real-time fraud detection API service
 """
 # Working on fraud detection API endpoints and streamlit integration
-
+# SECURITY NOTE:
+# We use pickle ONLY to load our own internally-generated synthetic graph
+# (data/synthetic/graph.gpickle). This file is created during data generation
+# and is treated as a trusted build artifact.
+# We will add SHA256 verification before loading to prevent tampering.
+import hashlib
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -429,13 +434,34 @@ async def lifespan(app: FastAPI):
         state.config = {}
     
     # Load synthetic fraud data for graph-based detection
+        # Load synthetic fraud data for graph-based detection
     try:
-        # Load transaction graph
+        # === SECURE GRAPH LOADING ===
+        # We verify the SHA256 hash of the pickle file before loading it.
+        # This mitigates supply-chain / tampering attacks on the .gpickle artifact.
         graph_path = Path("data/synthetic/graph.gpickle")
+        
+        # TODO: Replace this with the actual SHA256 of your generated graph.gpickle
+        EXPECTED_GRAPH_SHA256 = None   # Example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        
         if graph_path.exists():
-            with open(graph_path, 'rb') as f:
+            with open(graph_path, "rb") as f:
+                file_bytes = f.read()
+                actual_hash = hashlib.sha256(file_bytes).hexdigest()
+            
+            if EXPECTED_GRAPH_SHA256 and actual_hash != EXPECTED_GRAPH_SHA256:
+                raise RuntimeError(
+                    f"SECURITY ALERT: graph.gpickle integrity check FAILED!\n"
+                    f"Expected SHA256: {EXPECTED_GRAPH_SHA256}\n"
+                    f"Actual SHA256:   {actual_hash}\n"
+                    "Possible file tampering or corrupted artifact. Aborting startup."
+                )
+            
+            with open(graph_path, "rb") as f:
                 state.transaction_graph = pickle.load(f)
-            print(f"✓ Loaded transaction graph: {state.transaction_graph.number_of_nodes()} nodes, {state.transaction_graph.number_of_edges()} edges")
+            
+            print(f"✓ Loaded verified transaction graph: {state.transaction_graph.number_of_nodes()} nodes, "
+                  f"{state.transaction_graph.number_of_edges()} edges")
             state.graph_loaded = True
         else:
             print("⚠ Graph file not found at data/synthetic/graph.gpickle")

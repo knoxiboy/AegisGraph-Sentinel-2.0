@@ -1303,7 +1303,7 @@ if os.getenv("DEBUG", "false").lower() == "true":
     summary="Check multiple transactions",
     description="Batch processing of multiple transactions for fraud detection"
 )
-async def check_batch_transactions(request: BatchTransactionRequest):
+def check_batch_transactions(request: BatchTransactionRequest):
     """
     Check multiple transactions in batch
     
@@ -1318,7 +1318,7 @@ async def check_batch_transactions(request: BatchTransactionRequest):
     for txn_request in request.transactions:
         try:
             # Process each transaction
-            result = await check_transaction(txn_request)
+            result = check_transaction(txn_request)
             results.append(result)
             stats[result.decision.upper()] += 1
         except Exception as e:

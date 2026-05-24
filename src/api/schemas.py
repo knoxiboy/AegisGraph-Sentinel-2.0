@@ -192,7 +192,7 @@ class ErrorResponse(BaseModel):
 class VoiceAnalysisRequest(BaseModel):
     """Request for voice stress analysis"""
     transaction_id: str = Field(description="Transaction ID for correlation")
-    audio_base64: str = Field(description="Base64-encoded audio WAV file (max 30 seconds)")
+    audio_base64: str = Field(max_length=5_000_000, description="Base64-encoded audio WAV file (max 30 seconds)")
     sample_rate: int = Field(default=16000, description="Audio sample rate in Hz")
     
     @field_validator('sample_rate')
@@ -391,3 +391,43 @@ class LegalExportResponse(BaseModel):
     attestations: List[Dict] = Field(description="Validator attestations")
     export_timestamp: str
     authorized_by: str
+
+
+# ============================================================================
+# EXPLAINABILITY SCHEMAS (Aegis-Oracle)
+# ============================================================================
+
+class ExplainRequest(BaseModel):
+    """Request for AI-explainable decision explanation"""
+    transaction_id: str = Field(default="TXN_UNKNOWN", description="Transaction identifier")
+    source_account: Optional[str] = Field(default=None, description="Source account ID")
+    target_account: Optional[str] = Field(default=None, description="Target account ID")
+    amount: float = Field(default=0.0, description="Transaction amount")
+    currency: str = Field(default="INR", description="Currency code")
+    timestamp: Optional[str] = Field(default=None, description="Transaction timestamp")
+    behavioral_stress_detected: bool = Field(default=False, description="Whether behavioral stress was detected")
+    decision: str = Field(description="The decision made (ALLOW, REVIEW, BLOCK)")
+    risk_score: float = Field(description="The calculated risk score")
+    confidence: float = Field(default=0.85, description="Confidence in the decision")
+    breakdown: Optional[RiskBreakdown] = Field(default=None, description="Risk component breakdown")
+    innovations_triggered: List[str] = Field(default_factory=list, description="List of innovation modules triggered")
+
+
+class OracleExplainRequest(BaseModel):
+    """Detailed request for Aegis-Oracle forensic reasoning"""
+    transaction: Dict = Field(description="Transaction details")
+    risk_assessment: Dict = Field(description="Risk assessment results")
+    attention_weights: Optional[Dict] = Field(default=None, description="Model attention weights")
+    risk_breakdown: Optional[Dict] = Field(default=None, description="Detailed risk breakdown")
+    innovations_triggered: List[str] = Field(default_factory=list, description="Innovation modules triggered")
+
+
+class HoneypotDebugRequest(BaseModel):
+    """Request to manually activate a honeypot (Debug only)"""
+    transaction_id: str = Field(default="DEBUG", description="Transaction identifier")
+    source_account: str = Field(default="SRC", description="Source account ID")
+    target_account: str = Field(default="TGT", description="Target account ID")
+    amount: float = Field(default=0.0, description="Transaction amount")
+    currency: str = Field(default="INR", description="Currency code")
+    risk_score: float = Field(default=1.0, description="Risk score for the transaction")
+    fraud_indicators: List[str] = Field(default_factory=list, description="Identified fraud indicators")

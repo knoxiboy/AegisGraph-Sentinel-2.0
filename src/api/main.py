@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 import hashlib
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import time
@@ -27,10 +31,11 @@ from typing import Dict, List
 import uvicorn
 import random
 import json
-# Removed pickle import for security reasons
+import pickle
 import networkx as nx
 import numpy as np
 
+from ..config.validation import validate_environment
 from .schemas import (
     TransactionCheckRequest,
     TransactionCheckResponse,
@@ -52,6 +57,9 @@ from .schemas import (
     BlockchainVerificationResponse,
     LegalExportRequest,
     LegalExportResponse,
+    ExplainRequest,
+    OracleExplainRequest,
+    HoneypotDebugRequest,
 )
 
 from ..exceptions import register_exception_handlers, register_observability_middleware
@@ -256,7 +264,7 @@ except (ImportError, SyntaxError) as e:
                                 metadata={"pattern": "chain", "chain_length": chain_length},
                             )
                 except Exception as e:
-                    logger.error(f"Error: {e}")
+                    logger.error(f"Error in graph pattern analysis: {e}")
                     pass
                 except:
                     print(f"⚠️ Chain pattern: {source_account} is part of a {chain_length}-hop chain")
@@ -470,41 +478,6 @@ except (ImportError, SyntaxError) as e:
         }
 
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="AegisGraph Sentinel 2.0",
-    description="Real-Time Cross-Channel Mule Account Detection & Neutralization API",
-    version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-)
-
-# CORS middleware
-#
-# CWE-942 prevention: `allow_origins=["*"]` combined with
-# `allow_credentials=True` makes Starlette reflect the request's Origin
-# header back, effectively allowing credentialed cross-origin requests
-# from any site. Read the allowed origins from AEGIS_ALLOWED_ORIGINS
-# (comma-separated) instead, defaulting to local dev URLs.
-_default_origins = "http://localhost:3000,http://localhost:8501,http://127.0.0.1:8501"
-ALLOWED_ORIGINS = [
-    o.strip()
-    for o in os.getenv("AEGIS_ALLOWED_ORIGINS", _default_origins).split(",")
-    if o.strip()
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
-    max_age=600,
-)
-
-register_exception_handlers(app)
-register_observability_middleware(app)
-
 # Global state
 class AppState:
     """Application state"""
@@ -521,7 +494,7 @@ class AppState:
         self.fraud_chains = []
         self.mule_accounts = {'mule_acc_001', 'mule_acc_002', 'test_merchant', 'suspect_account_1', 'fraud_wallet_xyz'}
         self.account_profiles = {}
-        self.graph_loaded = True  # Enable for demo
+        self.graph_loaded = False
         # Lateral movement detection - rolling betweenness centrality baseline
         self.centrality_baseline = {}  # {account_id: [centrality_history]}
         self.centrality_window_size = 10  # Track last 10 measurements
@@ -536,11 +509,18 @@ class AppState:
 state = AppState()
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize service on startup"""
-    _startup_logger = get_logger("api.startup")
-    _startup_logger.info("AegisGraph Sentinel 2.0 starting up", event_type="startup_begin")
+async def _honeypot_auto_release_loop(interval_seconds: int = 60):
+    while True:
+        await asyncio.sleep(interval_seconds)
+        if state.honeypot_manager is not None:
+            try:
+                state.honeypot_manager.check_auto_release()
+            except Exception as exc:
+                _api_logger.warning(
+                    f"Honeypot auto-release check failed: {exc}",
+                    event_type="honeypot_auto_release_error",
+                )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -549,11 +529,15 @@ async def lifespan(app: FastAPI):
     Application lifespan. Initialises services and config on startup,
     tracks background tasks, and cancels them cleanly on shutdown.
     """
+    _startup_logger = get_logger("api.startup")
     # Startup
     print("=" * 80)
     print("AegisGraph Sentinel 2.0 - Starting up...")
     print("=" * 80)
-    
+
+    # Validate environment variables
+    validate_environment()
+
     # Load configuration
     config_path = Path("config/config.yaml")
     if config_path.exists():
@@ -568,39 +552,46 @@ async def lifespan(app: FastAPI):
         # Load synthetic fraud data for graph-based detection
     try:
         # === SECURE GRAPH LOADING ===
-        # We verify the SHA256 hash of the pickle file before loading it.
-        # This mitigates supply-chain / tampering attacks on the .gpickle artifact.
-        graph_path = Path("data/synthetic/graph.graphml")
+        # Prefer GraphML, but keep compatibility with the legacy trusted gpickle artifact.
+        graph_candidates = [
+            Path(os.getenv("AEGIS_GRAPH_PATH")) if os.getenv("AEGIS_GRAPH_PATH") else None,
+            Path("data/synthetic/graph.graphml"),
+            Path("data/synthetic/graph.gpickle"),
+        ]
+        graph_path = next((path for path in graph_candidates if path and path.exists()), None)
         
         # TODO: Replace this with the actual SHA256 of your generated graph.graphml
         EXPECTED_GRAPH_SHA256 = None   # Example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         
-        if graph_path.exists():
+        if graph_path:
             with open(graph_path, "rb") as f:
                 file_bytes = f.read()
                 actual_hash = hashlib.sha256(file_bytes).hexdigest()
             
             if EXPECTED_GRAPH_SHA256 and actual_hash != EXPECTED_GRAPH_SHA256:
                 raise RuntimeError(
-                    f"SECURITY ALERT: graph.graphml integrity check FAILED!\n"
+                    f"SECURITY ALERT: {graph_path} integrity check FAILED!\n"
                     f"Expected SHA256: {EXPECTED_GRAPH_SHA256}\n"
                     f"Actual SHA256:   {actual_hash}\n"
                     "Possible file tampering or corrupted artifact. Aborting startup."
                 )
             
-            with open(graph_path, "rb") as f:
-                state.transaction_graph = pickle.load(f)
+            if graph_path.suffix.lower() == ".graphml":
+                state.transaction_graph = nx.read_graphml(graph_path)
+            elif graph_path.suffix.lower() == ".gpickle":
+                with open(graph_path, "rb") as f:
+                    state.transaction_graph = pickle.load(f)
+            else:
+                raise ValueError(f"Unsupported graph artifact format: {graph_path.suffix}")
             _startup_logger.info(
                 "Loaded transaction graph",
                 event_type="graph_loaded",
                 metadata={
+                    "path": str(graph_path),
                     "nodes": state.transaction_graph.number_of_nodes(),
                     "edges": state.transaction_graph.number_of_edges(),
                 },
             )
-            import networkx as nx
-            state.transaction_graph = nx.read_graphml(graph_path)
-            
             print(f"✓ Loaded verified transaction graph: {state.transaction_graph.number_of_nodes()} nodes, "
                   f"{state.transaction_graph.number_of_edges()} edges")
             state.graph_loaded = True
@@ -611,6 +602,9 @@ async def lifespan(app: FastAPI):
             )
             print("⚠ Graph file not found at data/synthetic/graph.graphml")
         
+        if not graph_path:
+            state.graph_loaded = False
+
         # Load fraud chains
         chains_path = Path("data/synthetic/fraud_chains.json")
         if chains_path.exists():
@@ -728,8 +722,6 @@ async def lifespan(app: FastAPI):
             "innovations": INNOVATIONS_AVAILABLE,
         },
     )
-    asyncio.ensure_future(_honeypot_auto_release_loop())
-    print("⚠ Innovation modules not available")
     
     print("=" * 80)
     print("AegisGraph Sentinel 2.0 is ready")
@@ -786,46 +778,18 @@ app.add_middleware(
     max_age=600,
 )
 
-# Global state
-class AppState:
-    """Application state"""
-    def __init__(self):
-        self.start_time = time.time()
-        self.requests_processed = 0
-        self.decisions = {"ALLOW": 0, "REVIEW": 0, "BLOCK": 0}
-        self.total_risk_score = 0.0
-        self.total_processing_time = 0.0
-        self.model_loaded = False
-        self.config = {}
-        # Graph-based fraud detection
-        self.transaction_graph = None
-        self.fraud_chains = []
-        self.mule_accounts = {'mule_acc_001', 'mule_acc_002', 'test_merchant', 'suspect_account_1', 'fraud_wallet_xyz'}
-        self.account_profiles = {}
-        self.graph_loaded = True  # Enable for demo
-        # Lateral movement detection - rolling betweenness centrality baseline
-        self.centrality_baseline = {}  # {account_id: [centrality_history]}
-        self.centrality_window_size = 10  # Track last 10 measurements
-        # Innovation managers
-        self.voice_analyzer = None
-        self.mule_scorer = None
-        self.honeypot_manager = None
-        self.blockchain_manager = None
-        self.aegis_oracle = None  # Explainability engine
-        
-state = AppState()
+# Rate Limiting
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["100/minute"],
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
-async def _honeypot_auto_release_loop(interval_seconds: int = 60):
-    while True:
-        await asyncio.sleep(interval_seconds)
-        if state.honeypot_manager is not None:
-            try:
-                state.honeypot_manager.check_auto_release()
-            except Exception as exc:
-                _api_logger.warning(
-                    f"Honeypot auto-release check failed: {exc}",
-                    event_type="honeypot_auto_release_error",
-                )
+register_exception_handlers(app)
+register_observability_middleware(app)
+
 
 
 @app.get("/", tags=["General"])
@@ -1192,7 +1156,7 @@ async def check_transaction(request: TransactionCheckRequest):
     summary="Generate AI-explainable decision explanation",
     description="Innovation 5: Aegis-Oracle generates regulatory-compliant explanations for all fraud decisions. Includes causal factors, evidence,  and legal admissibility."
 )
-async def explain_transaction(payload: dict):
+async def explain_transaction(request: ExplainRequest):
     """
     Generate comprehensive explanation for a fraud decision
     
@@ -1215,29 +1179,29 @@ async def explain_transaction(payload: dict):
     try:
         # Extract transaction and risk info
         transaction = {
-            'transaction_id': payload.get('transaction_id', 'TXN_UNKNOWN'),
-            'source_account': payload.get('source_account'),
-            'target_account': payload.get('target_account'),
-            'amount': payload.get('amount', 0),
-            'currency': payload.get('currency', 'INR'),
-            'timestamp': payload.get('timestamp'),
-            'behavioral_stress_detected': payload.get('behavioral_stress_detected', False),
+            'transaction_id': request.transaction_id,
+            'source_account': request.source_account,
+            'target_account': request.target_account,
+            'amount': request.amount,
+            'currency': request.currency,
+            'timestamp': request.timestamp,
+            'behavioral_stress_detected': request.behavioral_stress_detected,
         }
         
         risk_assessment = {
-            'decision': payload.get('decision', 'ALLOW'),
-            'risk_score': payload.get('risk_score', 0.0),
-            'confidence': payload.get('confidence', 0.85),
+            'decision': request.decision,
+            'risk_score': request.risk_score,
+            'confidence': request.confidence,
         }
         
-        breakdown = payload.get('breakdown') or {
+        breakdown = request.breakdown.model_dump() if request.breakdown else {
             'graph': 0.0,
             'velocity': 0.0,
             'behavior': 0.0,
             'entropy': 0.0,
         }
         
-        innovations_triggered = payload.get('innovations_triggered', [])
+        innovations_triggered = request.innovations_triggered
         
         # Use Aegis-Oracle to generate explanation
         explanation = state.aegis_oracle.generate_explanation(
@@ -1264,7 +1228,7 @@ async def explain_transaction(payload: dict):
     summary="Get comprehensive AI reasoning for fraud decisions",
     description="Advanced Aegis-Oracle endpoint with full forensic analysis and causal reasoning"
 )
-async def oracle_explain_detailed(payload: dict):
+async def oracle_explain_detailed(request: OracleExplainRequest):
     """
     Advanced explainability endpoint with detailed forensic analysis
     
@@ -1281,11 +1245,11 @@ async def oracle_explain_detailed(payload: dict):
     
     try:
         explanation = state.aegis_oracle.generate_explanation(
-            transaction=payload.get('transaction', {}),
-            risk_assessment=payload.get('risk_assessment', {}),
-            attention_weights=payload.get('attention_weights', {}),
-            break_down=payload.get('risk_breakdown', {}),
-            innovations_triggered=payload.get('innovations_triggered', []),
+            transaction=request.transaction,
+            risk_assessment=request.risk_assessment,
+            attention_weights=request.attention_weights,
+            break_down=request.risk_breakdown,
+            innovations_triggered=request.innovations_triggered,
         )
         
         return {
@@ -1308,18 +1272,18 @@ if os.getenv("DEBUG", "false").lower() == "true":
         summary="Force honeypot activation (DEBUG mode only)",
         description="Available only when DEBUG env var is 'true'. For testing only.",
     )
-    def debug_activate_honeypot(payload: dict):
+    def debug_activate_honeypot(request: HoneypotDebugRequest):
         if state.honeypot_manager is None:
             raise HTTPException(status_code=500, detail="Honeypot manager not initialized")
         try:
             hp = state.honeypot_manager.activate_honeypot(
-                transaction_id=payload.get('transaction_id', 'DEBUG'),
-                source_account=payload.get('source_account', 'SRC'),
-                target_account=payload.get('target_account', 'TGT'),
-                amount=payload.get('amount', 0.0),
-                currency=payload.get('currency', 'INR'),
-                risk_score=payload.get('risk_score', 1.0),
-                fraud_indicators=payload.get('fraud_indicators', []),
+                transaction_id=request.transaction_id,
+                source_account=request.source_account,
+                target_account=request.target_account,
+                amount=request.amount,
+                currency=request.currency,
+                risk_score=request.risk_score,
+                fraud_indicators=request.fraud_indicators,
             )
             return {'honeypot_id': hp.honeypot_id, 'status': hp.status.value}
         except Exception as e:
@@ -1408,7 +1372,7 @@ async def get_model_info():
     summary="Analyze voice stress during transaction",
     description="Innovation 5: Detects phone coercion through acoustic stress analysis"
 )
-async def analyze_voice(request: VoiceAnalysisRequest):
+def analyze_voice(request: VoiceAnalysisRequest):
     """
     Analyze voice recording for stress and coercion indicators
     
@@ -1465,7 +1429,7 @@ async def analyze_voice(request: VoiceAnalysisRequest):
     summary="Score account opening for mule risk",
     description="Innovation 4: Predicts mule accounts before first transaction using 12 features"
 )
-async def score_account_opening(request: AccountOpeningRequest):
+def score_account_opening(request: AccountOpeningRequest):
     """
     Score a new account opening for mule recruitment risk
     
@@ -1526,9 +1490,9 @@ async def score_account_opening(request: AccountOpeningRequest):
     summary="Assess account mule risk",
     description="Innovation 3: Alias for mule assessment endpoint"
 )
-async def assess_mule_risk(request: AccountOpeningRequest):
+def assess_mule_risk(request: AccountOpeningRequest):
     """Alias endpoint for mule assessment"""
-    return await score_account_opening(request)
+    return score_account_opening(request)
 
 
 @app.get(

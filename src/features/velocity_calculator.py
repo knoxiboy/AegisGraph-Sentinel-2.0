@@ -89,9 +89,9 @@ class VelocityCalculator:
         
         energy = 0.0
         for i in range(len(transactions) - 1):
-            delta_amount = transactions[i].amount
-            delta_time = transactions[i+1].timestamp - transactions[i].timestamp
-            
+            delta_amount = transactions[i + 1].amount - transactions[i].amount
+            delta_time = transactions[i + 1].timestamp - transactions[i].timestamp
+
             if delta_time > 0:
                 energy += (delta_amount ** 2) / delta_time
         

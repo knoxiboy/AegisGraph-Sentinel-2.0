@@ -814,7 +814,7 @@ class BlockchainEvidenceManager:
                         and previous_hash == evidence.get('previous_block_hash')
                     )
 
-            verification['consensus_verified'] = len(evidence.get('validator_signatures', [])) > 0
+            verification['consensus_verified'] = len(evidence.get('validator_signatures', [])) >= 5
 
         verification['consensus_nodes'] = (
             len(evidence.get('validator_signatures', [])) if evidence else 0

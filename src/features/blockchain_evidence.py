@@ -603,6 +603,10 @@ class BlockchainEvidenceManager:
             )
 
         return attestations
+
+    def _authorized_validator_ids(self) -> set[str]:
+        """Return the trusted validator identities participating in quorum."""
+        return {node.node_id for node in self.nodes[1:6] if node.is_validator}
     
     def seal_evidence(
         self,
@@ -832,11 +836,42 @@ class BlockchainEvidenceManager:
                         and previous_hash == evidence.get('previous_block_hash')
                     )
 
-            verification['consensus_verified'] = len(evidence.get('validator_signatures', [])) >= 5
+            authorized_validators = self._authorized_validator_ids()
+            block_hash = (block or {}).get('hash') or evidence.get('block_hash')
+            unique_validators = set()
+            invalid_signatures = []
 
-        verification['consensus_nodes'] = (
-            len(evidence.get('validator_signatures', [])) if evidence else 0
-        )
+            for entry in evidence.get('validator_signatures', []) or []:
+                node_id, _, signature = entry.partition(':')
+                if not node_id or not signature:
+                    invalid_signatures.append(entry)
+                    continue
+                if node_id in unique_validators:
+                    invalid_signatures.append(entry)
+                    continue
+                if node_id not in authorized_validators or not block_hash:
+                    invalid_signatures.append(entry)
+                    continue
+
+                expected_signature = hashlib.sha256(
+                    f"{node_id}_{block_hash}".encode()
+                ).hexdigest()[:16]
+                if signature != expected_signature:
+                    invalid_signatures.append(entry)
+                    continue
+
+                unique_validators.add(node_id)
+
+            verification['consensus_nodes'] = len(unique_validators)
+            verification['consensus_verified'] = (
+                len(unique_validators) >= 5 and not invalid_signatures
+            )
+            verification['validator_provenance_verified'] = (
+                len(unique_validators) >= 5 and not invalid_signatures
+            )
+            verification['invalid_validator_signatures'] = invalid_signatures
+
+        verification['consensus_nodes'] = verification.get('consensus_nodes', 0)
         verification['original_timestamp'] = (
             evidence.get('consensus_timestamp')
             if evidence
@@ -854,8 +889,11 @@ class BlockchainEvidenceManager:
             'block_exists': verification['block_exists'],
             'chain_integrity': verification['chain_integrity'],
             'consensus_verified': verification['consensus_verified'],
+            'validator_provenance_verified': verification.get('validator_provenance_verified', False),
             'timestamp_verified': verification['timestamp_verified'],
             'consensus_nodes': verification['consensus_nodes'],
+            'invalid_validator_signatures': verification.get('invalid_validator_signatures', []),
+            'authorized_validators': sorted(self._authorized_validator_ids()),
             'storage_backend': evidence.get('_storage') if evidence else None,
             'block_hash': evidence.get('block_hash') if evidence else None,
         }

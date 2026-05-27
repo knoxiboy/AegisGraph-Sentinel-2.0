@@ -3,65 +3,6 @@ FastAPI Application for AegisGraph Sentinel 2.0
 
 Real-time fraud detection API service
 """
-
-from __future__ import annotations
-
-import asyncio
-import hashlib
-import hmac
-import json
-import os
-import time
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from enum import Enum
-from functools import partial
-from pathlib import Path
-from typing import Optional
-
-import networkx as nx
-import numpy as np
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
-import uvicorn
-
-from ..config.settings import get_settings
-from ..config.validation import validate_environment
-from ..runtime import LifecycleManager, RuntimeState
-from ..runtime.background_tasks import honeypot_auto_release_loop
-from .schemas import (
-    AccountOpeningRequest,
-    AccountOpeningResponse,
-    BatchTransactionRequest,
-    BatchTransactionResponse,
-    BlockchainEvidenceResponse,
-    BlockchainSealRequest,
-    BlockchainVerificationResponse,
-    ExplainRequest,
-    HealthCheckResponse,
-    HoneypotDebugRequest,
-    HoneypotListResponse,
-    HoneypotStatsResponse,
-    LegalExportRequest,
-    LegalExportResponse,
-    OracleExplainRequest,
-    HoneypotStatus,
-    RiskBreakdown,
-    StatsResponse,
-    TransactionCheckRequest,
-    TransactionCheckResponse,
-    VoiceAnalysisRequest,
-    VoiceAnalysisResponse,
-)
-
-from ..exceptions import register_exception_handlers, register_observability_middleware
-from ..observability import get_audit_logger, get_logger
-
-
 def _require_legal_export_authorization(authorization_token: str | None) -> None:
     """Legacy wrapper: ensure a provided authorization token matches configured hash.
 
@@ -470,7 +411,7 @@ except (ImportError, SyntaxError) as e:
                                 metadata={"pattern": "chain", "chain_length": chain_length},
                             )
                 except Exception as e:
-                    _api_logger.error(f"Error in graph pattern analysis: {e}")
+                    logger.error(f"Error in graph pattern analysis: {e}")
                     pass
                 except:
                     print(f"⚠️ Chain pattern: {source_account} is part of a {chain_length}-hop chain")

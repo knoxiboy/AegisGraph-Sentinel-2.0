@@ -375,6 +375,7 @@ def compute_risk_score(
     
     # 1. GRAPH-BASED RISK (50% weight)
     graph_risk = 0.0
+    centrality = None
     
     # Check mule accounts even without graph loaded (for demo mode)
     if state.graph_loaded:
@@ -448,7 +449,8 @@ def compute_risk_score(
             
             # Betweenness centrality (key intermediary in network)
             try:
-                centrality = nx.betweenness_centrality(G, k=min(100, G.number_of_nodes()))
+                if centrality is None:
+                    centrality = nx.betweenness_centrality(G, k=min(100, G.number_of_nodes()))
                 if source_account in centrality and centrality[source_account] > 0.01:
                     graph_risk += 0.15
                     _inference_logger.warning(
@@ -469,9 +471,10 @@ def compute_risk_score(
     if state.graph_loaded and state.transaction_graph and source_account in state.transaction_graph.nodes:
         G = state.transaction_graph
         try:
-            current_centrality = nx.betweenness_centrality(G, k=min(100, G.number_of_nodes()))
-            if source_account in current_centrality:
-                current_score = current_centrality[source_account]
+            if centrality is None:
+                centrality = nx.betweenness_centrality(G, k=min(100, G.number_of_nodes()))
+            if source_account in centrality:
+                current_score = centrality[source_account]
                 
                 # Get or initialize baseline
                 if source_account not in state.centrality_baseline:

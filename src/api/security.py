@@ -20,14 +20,8 @@ Usage in route definitions::
         ...
 
 Operators configure the service by exporting ``AEGIS_API_KEY_HASHES`` as
-a comma-separated list of lowercase hex SHA-256 hashes::
-
-    export AEGIS_API_KEY_HASHES="$(python -c 'import hashlib,secrets;
-    k=secrets.token_urlsafe(32); print(k); print(hashlib.sha256(k.encode()).hexdigest())')"
-
-The first line is the key to distribute to clients; the second line is
-the hash to set in the env var. See ``SECURITY.md`` for the full
-operator playbook.
+a comma-separated list of lowercase hex SHA-256 hashes. See ``SECURITY.md``
+for the full operator playbook.
 """
 
 from __future__ import annotations
@@ -35,21 +29,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-from typing import Annotated
+from typing import Annotated, List, Optional
 
 from fastapi import Header, HTTPException, status
 
-# Environment variable read on every request.
-#
-# The cost is one ``os.getenv`` and a split — well under a microsecond
-# per call — and keeping the read inline means key rotation only
-# requires updating the env and restarting workers, not bouncing the
-# whole process. If profiling later shows this on a hot path, swap to
-# a settings-backed cached property in ``src.config``.
+# Environment variable read on every request. The cost is one
+# ``os.getenv`` and a split — well under a microsecond per call — and
+# keeping the read inline means key rotation only requires updating the
+# env and restarting workers, not bouncing the whole process.
 _ENV_VAR = "AEGIS_API_KEY_HASHES"
 
 
-def _load_allowed_hashes() -> list[str]:
+def _load_allowed_hashes() -> List[str]:
     """Return the list of configured SHA-256 hashes, lowercased.
 
     Empty list means the gate is not configured; the dependency treats
@@ -64,7 +55,7 @@ def _load_allowed_hashes() -> list[str]:
 
 
 def require_api_key(
-    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+    x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
 ) -> None:
     """FastAPI dependency that gates a route behind an API key check.
 

@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 import networkx as nx
 import numpy as np
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
@@ -183,6 +183,38 @@ def _validate_legal_export_request(
     provided_token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     if not hmac.compare_digest(provided_token_hash, expected_token_hash):
         raise HTTPException(status_code=403, detail="Unauthorized legal export request")
+
+
+def _require_verbose_health_access(
+    verbose: bool = Query(default=False),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+) -> None:
+    if verbose:
+        require_api_key(x_api_key)
+
+
+def _build_health_response(include_details: bool) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "status": "healthy",
+        "service": "AegisGraph Sentinel",
+    }
+
+    if not include_details:
+        return response
+
+    uptime = time.time() - state.start_time if hasattr(state, "start_time") else 0.0
+    response.update(
+        {
+            "version": "2.0.0",
+            "model_loaded": state.model_loaded,
+            "graph_loaded": state.graph_loaded,
+            "innovations_available": INNOVATIONS_AVAILABLE,
+            "requests_processed": state.requests_processed,
+            "uptime_seconds": uptime,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+    )
+    return response
 from ..exceptions import register_exception_handlers, register_observability_middleware
 from ..observability import get_audit_logger, get_logger
 from ..core import register_core_services, register_graph_services, register_innovation_services
@@ -1323,44 +1355,34 @@ async def root():
     }
 
 
-@app.get("/api/v1/health", response_model=HealthCheckResponse, tags=["System"])
-async def health_check_v1():
+@app.get(
+    "/api/v1/health",
+    response_model=HealthCheckResponse,
+    response_model_exclude_none=True,
+    tags=["System"],
+    dependencies=[Depends(_require_verbose_health_access)],
+)
+async def health_check_v1(verbose: bool = False):
     """Health check endpoint (v1 routing)"""
-    uptime = time.time() - state.start_time if hasattr(state, 'start_time') else 0
-    
-    return HealthCheckResponse(
-        status="healthy",
-        version="2.0",
-        model_loaded=MODEL_AVAILABLE,
-        graph_loaded=state.graph_loaded if hasattr(state, 'graph_loaded') else False,
-        innovations_available=INNOVATIONS_AVAILABLE,
-        uptime_seconds=uptime,
-        requests_processed=state.requests_processed,
-        timestamp=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-    )
+    return _build_health_response(include_details=verbose)
 
-@app.get("/health", response_model=HealthCheckResponse, tags=["General"])
-async def health_check():
+@app.get(
+    "/health",
+    response_model=HealthCheckResponse,
+    response_model_exclude_none=True,
+    tags=["General"],
+    dependencies=[Depends(_require_verbose_health_access)],
+)
+async def health_check(verbose: bool = False):
     """
     Health check endpoint
     
     Returns service status and basic statistics
     """
-    uptime = time.time() - state.start_time if hasattr(state, 'start_time') else 0
-    
-    return HealthCheckResponse(
-        status="healthy",
-        version="2.0.0",
-        model_loaded=state.model_loaded,
-        graph_loaded=state.graph_loaded,
-        innovations_available=INNOVATIONS_AVAILABLE,
-        uptime_seconds=uptime,
-        requests_processed=state.requests_processed,
-        timestamp=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-    )
+    return _build_health_response(include_details=verbose)
 
 
-@app.get("/stats", response_model=StatsResponse, tags=["General"])
+@app.get("/stats", response_model=StatsResponse, tags=["General"], dependencies=[Depends(require_api_key)])
 async def get_stats():
     """
     Get service statistics

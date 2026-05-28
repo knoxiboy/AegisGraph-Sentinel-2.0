@@ -15,10 +15,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.api import main as api_main
 from src.api.main import app, state
+from src.api.security import require_api_key
 from src.api.schemas import RiskBreakdown, TransactionCheckResponse, LegalExportRequest
 
 
 client = TestClient(app)
+
+_TEST_API_KEY = "test-api-key-for-health-tests"
+_TEST_API_KEY_HASH = hashlib.sha256(_TEST_API_KEY.encode("utf-8")).hexdigest()
+
+
+def _enable_real_api_key_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AEGIS_API_KEY_HASHES", _TEST_API_KEY_HASH)
+    app.dependency_overrides.pop(require_api_key, None)
 
 
 def _clear_rate_limit_storage():
@@ -64,22 +73,91 @@ class _FakeBlockchainManager:
 class TestHealthEndpoint:
     """Test health check endpoint"""
     
-    def test_health_check(self):
-        """Test /health endpoint"""
+    def test_health_check_public_is_minimal(self):
+        """Test /health endpoint returns only sanitized public fields"""
         response = client.get("/health")
         
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
-        assert "timestamp" in data
+        assert data["service"] == "AegisGraph Sentinel"
+        assert "model_loaded" not in data
+        assert "graph_loaded" not in data
+        assert "innovations_available" not in data
+        assert "requests_processed" not in data
+        assert "uptime_seconds" not in data
+
+    def test_api_v1_health_public_is_minimal(self):
+        """Test /api/v1/health returns only sanitized public fields"""
+        response = client.get("/api/v1/health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["service"] == "AegisGraph Sentinel"
+        assert "model_loaded" not in data
+        assert "graph_loaded" not in data
+        assert "innovations_available" not in data
+        assert "requests_processed" not in data
+        assert "uptime_seconds" not in data
+
+    def test_verbose_health_requires_auth(self, monkeypatch):
+        """Verbose health requests must be rejected without an API key."""
+        _enable_real_api_key_gate(monkeypatch)
+        response = client.get("/health?verbose=true")
+
+        assert response.status_code == 401
+
+    def test_verbose_health_returns_details_when_authenticated(self, monkeypatch):
+        """Verbose health requests should expose operational data only with auth."""
+        _enable_real_api_key_gate(monkeypatch)
+        headers = {"X-API-Key": _TEST_API_KEY}
+
+        response = client.get("/health?verbose=true", headers=headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["service"] == "AegisGraph Sentinel"
+        assert "model_loaded" in data
+        assert "graph_loaded" in data
+        assert "innovations_available" in data
+        assert "requests_processed" in data
+        assert "uptime_seconds" in data
+
+    def test_api_v1_verbose_health_returns_details_when_authenticated(self, monkeypatch):
+        """Verbose v1 health requests should expose operational data only with auth."""
+        _enable_real_api_key_gate(monkeypatch)
+        headers = {"X-API-Key": _TEST_API_KEY}
+
+        response = client.get("/api/v1/health?verbose=true", headers=headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["service"] == "AegisGraph Sentinel"
+        assert "model_loaded" in data
+        assert "graph_loaded" in data
+        assert "innovations_available" in data
+        assert "requests_processed" in data
+        assert "uptime_seconds" in data
 
 
 class TestStatsEndpoint:
     """Test statistics endpoint"""
     
-    def test_get_stats(self):
-        """Test /stats endpoint"""
+    def test_get_stats_requires_auth(self, monkeypatch):
+        """Test /stats endpoint requires an API key"""
+        _enable_real_api_key_gate(monkeypatch)
         response = client.get("/stats")
+
+        assert response.status_code == 401
+
+    def test_get_stats_with_auth(self, monkeypatch):
+        """Test /stats endpoint with an API key"""
+        _enable_real_api_key_gate(monkeypatch)
+        headers = {"X-API-Key": _TEST_API_KEY}
+        response = client.get("/stats", headers=headers)
         
         assert response.status_code == 200
         data = response.json()

@@ -76,7 +76,6 @@ def client_without_auth_configured(monkeypatch: pytest.MonkeyPatch) -> Iterator[
         "/",
         "/health",
         "/api/v1/health",
-        "/stats",
     ],
 )
 def test_public_endpoints_remain_open(
@@ -86,7 +85,7 @@ def test_public_endpoints_remain_open(
     response = client_with_auth_configured.get(path)
     assert response.status_code == 200, (
         f"Public endpoint {path} returned {response.status_code} "
-        "without an API key. Health/stats endpoints must stay open."
+        "without an API key. Health endpoints must stay open."
     )
 
 
@@ -108,6 +107,7 @@ _GATED_ENDPOINTS = [
     ("POST", "/api/v1/mule/assess", {}),
     ("POST", "/api/v1/blockchain/seal", {}),
     ("GET", "/api/v1/blockchain/verify/some-evidence-id", None),
+    ("GET", "/stats", None),
     ("GET", "/api/v1/model/info", None),
 ]
 

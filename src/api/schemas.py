@@ -233,13 +233,14 @@ class BatchTransactionResponse(BaseModel):
 class HealthCheckResponse(BaseModel):
     """Health check response"""
     status: str = Field(description="Service status")
-    version: str = Field(default="2.0", description="API version")
-    model_loaded: bool = Field(description="Whether model is loaded")
-    graph_loaded: bool = Field(description="Whether transaction graph is loaded")
-    innovations_available: bool = Field(default=True, description="Whether innovations are available")
-    uptime_seconds: float = Field(default=0.0, description="Service uptime in seconds")
-    requests_processed: int = Field(description="Total requests processed")
-    timestamp: str = Field(description="Response timestamp")
+    service: str = Field(default="AegisGraph Sentinel", description="Service name")
+    version: Optional[str] = Field(default=None, description="API version")
+    model_loaded: Optional[bool] = Field(default=None, description="Whether model is loaded")
+    graph_loaded: Optional[bool] = Field(default=None, description="Whether transaction graph is loaded")
+    innovations_available: Optional[bool] = Field(default=None, description="Whether innovations are available")
+    uptime_seconds: Optional[float] = Field(default=None, description="Service uptime in seconds")
+    requests_processed: Optional[int] = Field(default=None, description="Total requests processed")
+    timestamp: Optional[str] = Field(default=None, description="Response timestamp")
 
 
 class ModelInfo(BaseModel):

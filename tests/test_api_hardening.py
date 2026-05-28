@@ -10,6 +10,7 @@ import pytest
 
 from src.api import main as api_main
 from src.api.main import state
+from src.api.security import require_api_key
 
 
 def _transaction(transaction_id="txn_001", amount=100.0):
@@ -24,16 +25,28 @@ def _transaction(transaction_id="txn_001", amount=100.0):
     }
 
 
+def _enable_real_api_key_gate(monkeypatch):
+    monkeypatch.setenv("AEGIS_API_KEY_HASHES", hashlib.sha256(b"hardening-test-key").hexdigest())
+    api_main.app.dependency_overrides.pop(require_api_key, None)
+
+
 def test_health_smoke(api_client):
     response = api_client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
+    body = response.json()
+    assert body["status"] == "healthy"
+    assert body["service"] == "AegisGraph Sentinel"
+    assert "model_loaded" not in body
+    assert "graph_loaded" not in body
+    assert "innovations_available" not in body
+    assert "requests_processed" not in body
+    assert "uptime_seconds" not in body
 
 
-def test_stats_smoke(api_client):
+def test_stats_smoke(api_client, monkeypatch):
+    _enable_real_api_key_gate(monkeypatch)
     response = api_client.get("/stats")
-    assert response.status_code == 200
-    assert "total_requests" in response.json()
+    assert response.status_code == 401
 
 
 def test_missing_amount_returns_json_validation_error(api_client):
@@ -71,7 +84,7 @@ def test_missing_graph_artifact_does_not_crash(api_client):
     response = api_client.get("/health")
 
     assert response.status_code == 200
-    assert response.json()["graph_loaded"] is False
+    assert "graph_loaded" not in response.json()
     assert state.graph_loaded is False
 
 

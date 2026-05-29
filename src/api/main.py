@@ -7,6 +7,7 @@ Real-time fraud detection API service
 from __future__ import annotations
 
 import asyncio
+import binascii
 import hashlib
 import hmac
 import json
@@ -959,6 +960,7 @@ class AppState:
         self.decisions = {decision.value: 0 for decision in FraudDecision}
         self.total_risk_score = 0.0
         self.total_processing_time = 0.0
+        self.metrics_lock = asyncio.Lock()
         self.model_loaded = False
         self.config = {}
         # Graph-based fraud detection
@@ -1745,11 +1747,15 @@ async def check_transaction(request: TransactionCheckRequest):
             ),
         )
 
-        # Generate explanation
-        explanation_result = generate_explanation(
-            transaction=transaction,
-            risk_result=risk_result,
-            detail_level='high',
+        # Generate explanation off the event loop to keep the request thread responsive.
+        explanation_result = await loop.run_in_executor(
+            None,
+            partial(
+                generate_explanation,
+                transaction=transaction,
+                risk_result=risk_result,
+                detail_level='high',
+            ),
         )
         
         # Innovation 2: Check if honeypot should be activated
@@ -1865,12 +1871,13 @@ async def check_transaction(request: TransactionCheckRequest):
         # Processing time
         processing_time_ms = (time.time() - start_time) * 1000
         
-        # Update statistics
         internal_decision = _normalize_decision(risk_result['decision'])
-        state.requests_processed += 1
-        state.decisions[internal_decision] += 1
-        state.total_risk_score += risk_result['risk_score']
-        state.total_processing_time += processing_time_ms
+        async with state.metrics_lock:
+            # Update statistics atomically to avoid interleaving concurrent request mutations.
+            state.requests_processed += 1
+            state.decisions[internal_decision] += 1
+            state.total_risk_score += risk_result['risk_score']
+            state.total_processing_time += processing_time_ms
         
         # Prepare response with innovation fields
         decision = _decision_to_api_value(internal_decision)
@@ -2049,7 +2056,11 @@ if settings.runtime.debug:
         summary="Force honeypot activation (DEBUG mode only)",
         description="Available only when DEBUG env var is 'true'. For testing only.",
     )
-    def debug_activate_honeypot(request: HoneypotDebugRequest):
+    def debug_activate_honeypot(request: HoneypotDebugRequest, x_honeypot_admin_token: Optional[str] = Header(None, alias="X-Honeypot-Admin-Token")):
+        # Ensure this endpoint is only available in DEBUG mode at runtime
+        if not settings.runtime.debug:
+            raise HTTPException(status_code=404, detail="Debug honeypot activation endpoint not available")
+        _require_honeypot_admin(x_honeypot_admin_token)
         honeypot_manager = state.services.optional_get("honeypot_manager")
         if honeypot_manager is None:
             raise HTTPException(status_code=500, detail="Honeypot manager not initialized")
@@ -2174,7 +2185,8 @@ async def get_model_info():
     description="Innovation 5: Detects phone coercion through acoustic stress analysis",
     dependencies=[Depends(require_api_key)]
 )
-def analyze_voice(request: VoiceAnalysisRequest):
+@limiter.limit("10/minute")
+async def analyze_voice(request: Request, request_body: VoiceAnalysisRequest):
     """
     Analyze voice recording for stress and coercion indicators
     
@@ -2191,26 +2203,39 @@ def analyze_voice(request: VoiceAnalysisRequest):
     try:
         import base64
         import tempfile
-        import wave
         
         # Decode base64 audio
-        audio_bytes = base64.b64decode(request.audio_base64, validate=True)
+        try:
+            audio_bytes = base64.b64decode(request_body.audio_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid base64 audio payload") from exc
+
+        # Base64 can still expand into a large decoded blob. Cap decoded bytes
+        # as well so short voice samples cannot monopolize memory or CPU.
+        if len(audio_bytes) > 350_000:
+            raise HTTPException(status_code=413, detail="Audio payload too large")
         
         # Save to temporary file
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.wav', delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
         
-        # Analyze voice stress
-        result = voice_analyzer.analyze_voice(
-            audio_file=tmp_path,
-            sample_rate=request.sample_rate
+        # Offload CPU-heavy analysis so a few voice requests do not monopolize
+        # the request worker thread.
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            partial(
+                voice_analyzer.analyze_voice,
+                audio_file=tmp_path,
+                sample_rate=request_body.sample_rate,
+            ),
         )
         
         processing_time_ms = (time.time() - start_time) * 1000
         
         return VoiceAnalysisResponse(
-            transaction_id=request.transaction_id,
+            transaction_id=request_body.transaction_id,
             stress_score=result['stress_score'],
             classification=result['classification'],
             confidence=result['confidence'],
@@ -2218,8 +2243,8 @@ def analyze_voice(request: VoiceAnalysisRequest):
             recommended_action=result['recommended_action'],
             processing_time_ms=processing_time_ms,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid voice analysis request") from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         _raise_internal_server_error("Voice analysis", exc)
     finally:

@@ -1851,10 +1851,10 @@ if settings.runtime.debug:
         description="Available only when DEBUG env var is 'true'. For testing only.",
     )
     def debug_activate_honeypot(request: HoneypotDebugRequest, x_honeypot_admin_token: Optional[str] = Header(None, alias="X-Honeypot-Admin-Token")):
-    # Ensure this endpoint is only available in DEBUG mode at runtime
-    if not settings.runtime.debug:
-        raise HTTPException(status_code=404, detail="Debug honeypot activation endpoint not available")
-    _require_honeypot_admin(x_honeypot_admin_token)
+        # Ensure this endpoint is only available in DEBUG mode at runtime
+        if not settings.runtime.debug:
+            raise HTTPException(status_code=404, detail="Debug honeypot activation endpoint not available")
+        _require_honeypot_admin(x_honeypot_admin_token)
         honeypot_manager = state.services.optional_get("honeypot_manager")
         if honeypot_manager is None:
             raise HTTPException(status_code=500, detail="Honeypot manager not initialized")

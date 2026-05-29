@@ -837,6 +837,7 @@ class AppState:
         self.decisions = {decision.value: 0 for decision in FraudDecision}
         self.total_risk_score = 0.0
         self.total_processing_time = 0.0
+        self.metrics_lock = asyncio.Lock()
         self.model_loaded = False
         self.config = {}
         # Graph-based fraud detection
@@ -1623,11 +1624,15 @@ async def check_transaction(request: TransactionCheckRequest):
             ),
         )
 
-        # Generate explanation
-        explanation_result = generate_explanation(
-            transaction=transaction,
-            risk_result=risk_result,
-            detail_level='high',
+        # Generate explanation off the event loop to keep the request thread responsive.
+        explanation_result = await loop.run_in_executor(
+            None,
+            partial(
+                generate_explanation,
+                transaction=transaction,
+                risk_result=risk_result,
+                detail_level='high',
+            ),
         )
         
         # Innovation 2: Check if honeypot should be activated
@@ -1743,12 +1748,13 @@ async def check_transaction(request: TransactionCheckRequest):
         # Processing time
         processing_time_ms = (time.time() - start_time) * 1000
         
-        # Update statistics
         internal_decision = _normalize_decision(risk_result['decision'])
-        state.requests_processed += 1
-        state.decisions[internal_decision] += 1
-        state.total_risk_score += risk_result['risk_score']
-        state.total_processing_time += processing_time_ms
+        async with state.metrics_lock:
+            # Update statistics atomically to avoid interleaving concurrent request mutations.
+            state.requests_processed += 1
+            state.decisions[internal_decision] += 1
+            state.total_risk_score += risk_result['risk_score']
+            state.total_processing_time += processing_time_ms
         
         # Prepare response with innovation fields
         decision = _decision_to_api_value(internal_decision)

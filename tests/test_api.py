@@ -4,6 +4,7 @@ Unit tests for API endpoints
 # Working on API endpoint testing
 
 import pytest
+import asyncio
 from fastapi.testclient import TestClient
 import sys
 from pathlib import Path
@@ -53,6 +54,16 @@ def _clear_rate_limit_storage():
                 except TypeError:
                     continue
                 return
+
+
+class _RecordingLoop:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def run_in_executor(self, executor, func, *args):
+        self.calls.append((executor, func, args))
+        return self.results[len(self.calls) - 1]
 
 
 class _FakeBlockchainManager:
@@ -630,6 +641,55 @@ class TestCORSandSecurity:
         
         # All should succeed (rate limiting not implemented yet)
         assert all(code == 200 for code in responses)
+
+
+class TestAsyncExplainabilityOffload:
+    def test_transaction_explanation_uses_executor(self, monkeypatch):
+        """Explanation generation should be offloaded from the request thread."""
+        original_requests_processed = state.requests_processed
+        original_decisions = state.decisions.copy()
+        original_total_risk_score = state.total_risk_score
+        original_total_processing_time = state.total_processing_time
+
+        monkeypatch.setattr(api_main, "INNOVATIONS_AVAILABLE", True)
+        monkeypatch.setattr(api_main, "LATERAL_MOVEMENT_AVAILABLE", False)
+
+        try:
+            txn_loop = _RecordingLoop([
+                {
+                    "risk_score": 0.12,
+                    "decision": "ALLOW",
+                    "confidence": 0.91,
+                    "breakdown": {"graph": 0.1, "velocity": 0.1, "behavior": 0.1, "entropy": 0.1},
+                    "lateral_movement_detected": False,
+                },
+                {
+                    "explanation": "generated off thread",
+                    "recommended_action": "monitor",
+                },
+            ])
+            monkeypatch.setattr(api_main.asyncio, "get_running_loop", lambda: txn_loop)
+
+            txn_request = api_main.TransactionCheckRequest(
+                transaction_id="txn-379",
+                source_account="user_1",
+                target_account="merchant_1",
+                amount=25.0,
+                currency="INR",
+                mode="UPI",
+                timestamp="2026-05-28T14:30:00Z",
+            )
+
+            txn_response = asyncio.run(api_main.check_transaction(txn_request))
+
+            assert len(txn_loop.calls) == 2
+            assert txn_loop.calls[1][1].func is api_main.generate_explanation
+            assert txn_response.explanation == "generated off thread"
+        finally:
+            state.requests_processed = original_requests_processed
+            state.decisions = original_decisions
+            state.total_risk_score = original_total_risk_score
+            state.total_processing_time = original_total_processing_time
 
 
 if __name__ == "__main__":

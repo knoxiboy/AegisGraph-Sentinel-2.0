@@ -251,6 +251,24 @@ class TestFeatureIntegration:
         assert isinstance(kinetic_energy, float)
         assert isinstance(entropy, float)
 
+    def test_k_hop_neighbors_avoids_revisiting_cycle_nodes(self):
+        """Test k-hop expansion stops revisiting nodes in a cycle."""
+        import networkx as nx
+
+        entropy_calculator = GraphEntropyCalculator()
+        graph = nx.Graph()
+        graph.add_edges_from([
+            ('A', 'B'),
+            ('B', 'C'),
+            ('C', 'A'),
+            ('C', 'D'),
+        ])
+
+        neighbors = entropy_calculator._get_k_hop_neighbors('A', graph, 3)
+
+        assert neighbors == {'B', 'C', 'D'}
+        assert len(neighbors) == 3
+
 
 class TestPredictiveMuleCache:
     """Test PredictiveMuleScorer cache optimization (issue #435)"""

@@ -434,15 +434,32 @@ class GraphEntropyCalculator:
             return {node}
         
         neighbors = set()
+        visited = {node}
         current_layer = {node}
         
         for _ in range(k):
             next_layer = set()
             for n in current_layer:
-                if graph.has_node(n):
-                    next_layer.update(graph.neighbors(n))
+                has_node = False
+                if hasattr(graph, "has_node"):
+                    has_node = graph.has_node(n)
+                else:
+                    has_node = n in graph.nodes()
+
+                if has_node:
+                    if hasattr(graph, "neighbors"):
+                        neighbor_iter = graph.neighbors(n)
+                    else:
+                        neighbor_iter = graph.successors(n)
+
+                    for neighbor in neighbor_iter:
+                        if neighbor not in visited:
+                            next_layer.add(neighbor)
+                            visited.add(neighbor)
             neighbors.update(next_layer)
             current_layer = next_layer
+            if not current_layer:
+                break
         
         return neighbors
 

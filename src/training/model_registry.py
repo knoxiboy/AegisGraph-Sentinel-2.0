@@ -25,6 +25,7 @@ class ModelRegistry:
         self,
         registry_dir: Union[str, Path],
         backend: Optional[StorageBackend] = None,
+        max_history: int = 50,
     ):
         """Initialise the registry directory and load its manifest."""
         self.registry_dir = Path(registry_dir)
@@ -32,6 +33,7 @@ class ModelRegistry:
         self.backend = backend or LocalBackend(self.registry_dir)
         self.manifest_path = self.registry_dir / "registry_manifest.json"
         self._manifest_lock = threading.RLock()
+        self._max_history = max_history
         self._manifest = self._load_manifest()
 
     def save_version(self, epoch: int, checkpoint: dict, metrics: dict) -> str:
@@ -54,9 +56,10 @@ class ModelRegistry:
             "artifact_path": artifact_name,
         }
         with self._manifest_lock:
-            manifest = self._load_manifest()
-            manifest["versions"].append(entry)
-            self._manifest = manifest
+            self._manifest["versions"].append(entry)
+            versions = self._manifest["versions"]
+            if len(versions) > self._max_history:
+                self._manifest["versions"] = versions[-self._max_history:]
             self._write_manifest()
         return version_id
 

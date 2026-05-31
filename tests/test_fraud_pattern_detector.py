@@ -67,6 +67,20 @@ def test_detect_fan_out_hubs_incremental_aggregation():
     assert hub["avg_transfer_amount"] == pytest.approx((sum(200.0 + i for i in range(15))) / 15)
 
 
+def test_detect_fan_out_hubs_respects_threshold():
+    """Fan-out detection correctly filters below threshold."""
+    detector = FraudPatternDetector()
+    transactions = [
+        {"source_account": s, "target_account": "t", "amount": 100, "timestamp": i}
+        for i, s in enumerate(["a", "a", "a", "b"])
+    ]
+
+    hubs = detector.detect_fan_out_hubs(transactions, threshold_outgoing=3)
+    assert len(hubs) == 1
+    assert hubs[0]["account"] == "a"
+    assert hubs[0]["outgoing_transfer_count"] == 3
+
+    hubs = detector.detect_fan_out_hubs(transactions, threshold_outgoing=4)
 def test_detect_fan_in_hubs_respects_threshold():
     """Fan-in detection correctly filters below threshold."""
     detector = FraudPatternDetector()

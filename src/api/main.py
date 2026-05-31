@@ -2131,6 +2131,10 @@ async def oracle_explain_detailed(request: OracleExplainRequest):
 # This endpoint is ONLY registered when DEBUG env var is set to "true".
 # Never expose this route in production.
 if settings.runtime.debug:
+    if settings.runtime.is_production:
+        raise RuntimeError(
+            "Unsafe configuration: debug honeypot routes cannot be enabled in production."
+        )
     @app.post(
         "/debug/activate_honeypot",
         tags=["Debug"],

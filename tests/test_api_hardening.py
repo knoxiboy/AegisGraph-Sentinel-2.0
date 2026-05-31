@@ -12,6 +12,7 @@ import types
 
 import networkx as nx
 import pytest
+from fastapi.testclient import TestClient
 
 from src.api import main as api_main
 from src.api.main import state
@@ -35,6 +36,39 @@ def _enable_real_api_key_gate(monkeypatch):
     api_main.app.dependency_overrides.pop(require_api_key, None)
 
 
+def _load_fresh_api_main(monkeypatch, *, environment: str, debug: str):
+    from src.config import settings as config_settings
+
+    for module_name in (
+        "src.features.voice_stress_analysis",
+        "src.features.predictive_mule_identification",
+        "src.features.honeypot_escrow",
+        "src.features.blockchain_evidence",
+        "src.features.aegis_oracle_explainer",
+        "src.features.lateral_movement",
+    ):
+        monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
+
+    monkeypatch.setenv("AEGIS_ENV", environment)
+    monkeypatch.setenv("DEBUG", debug)
+
+    module_path = Path(api_main.__file__)
+    spec = importlib.util.spec_from_file_location(
+        "src.api.main",
+        module_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    monkeypatch.setitem(sys.modules, "src.api.main", module)
+    previous_settings_cache = config_settings._settings_cache
+    config_settings.reset_settings_cache()
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        config_settings._settings_cache = previous_settings_cache
+    return module
+
+
 def test_health_smoke(api_client):
     response = api_client.get("/health")
     assert response.status_code == 200
@@ -46,6 +80,48 @@ def test_health_smoke(api_client):
     assert "innovations_available" not in body
     assert "requests_processed" not in body
     assert "uptime_seconds" not in body
+
+
+def test_debug_honeypot_route_is_not_registered_in_production(monkeypatch):
+    module = _load_fresh_api_main(monkeypatch, environment="production", debug="false")
+
+    assert not any(getattr(route, "path", None) == "/debug/activate_honeypot" for route in module.app.routes)
+
+
+def test_debug_honeypot_route_fails_closed_when_enabled_in_production(monkeypatch):
+    with pytest.raises(RuntimeError, match="debug honeypot routes cannot be enabled in production"):
+        _load_fresh_api_main(monkeypatch, environment="production", debug="true")
+
+
+def test_debug_honeypot_route_works_in_safe_debug_environment(monkeypatch):
+    module = _load_fresh_api_main(monkeypatch, environment="development", debug="true")
+    fake_manager = Mock()
+    fake_manager.activate_honeypot.return_value = Mock(
+        honeypot_id="HP_TEST_001",
+        status=Mock(value="ACTIVE"),
+    )
+
+    monkeypatch.setenv("AEGIS_HONEYPOT_ADMIN_TOKEN_HASH", hashlib.sha256(b"debug-token").hexdigest())
+    monkeypatch.setattr(module.state.services, "optional_get", lambda name: fake_manager if name == "honeypot_manager" else None)
+
+    with TestClient(module.app) as client:
+        response = client.post(
+            "/debug/activate_honeypot",
+            headers={"X-Honeypot-Admin-Token": "debug-token"},
+            json={
+                "transaction_id": "txn_debug_001",
+                "source_account": "acct_src",
+                "target_account": "acct_dst",
+                "amount": 100.0,
+                "currency": "INR",
+                "risk_score": 1.0,
+                "fraud_indicators": ["manual-test"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"honeypot_id": "HP_TEST_001", "status": "ACTIVE"}
+    fake_manager.activate_honeypot.assert_called_once()
 
 
 def test_stats_smoke(api_client, monkeypatch):

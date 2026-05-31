@@ -364,8 +364,8 @@ def _fallback_compute_risk_score(transaction: dict, biometrics: dict = None, **k
                     )
 
             try:
-                neighbors = list(G.neighbors(source_account))
-                if len(neighbors) >= 2:
+                initial_successors = list(G.successors(source_account))
+                if len(initial_successors) >= 1:
                     chain_length = 0 #ready
                     current = source_account
                     visited = set()
@@ -375,8 +375,11 @@ def _fallback_compute_risk_score(transaction: dict, biometrics: dict = None, **k
                         visited.add(current)
                         successors = list(G.successors(current))
                         if len(successors) == 1:
+                            next_node = successors[0]
+                            if next_node in visited:
+                                break
                             chain_length += 1
-                            current = successors[0]
+                            current = next_node
                         else:
                             break
 
@@ -396,6 +399,7 @@ def _fallback_compute_risk_score(transaction: dict, biometrics: dict = None, **k
                         "error_type": type(exc).__name__,
                     },
                 )
+
 
     graph_risk = min(graph_risk, 1.0)
     breakdown['graph'] = graph_risk

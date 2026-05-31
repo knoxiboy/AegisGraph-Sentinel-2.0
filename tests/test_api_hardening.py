@@ -93,6 +93,54 @@ def test_missing_graph_artifact_does_not_crash(api_client):
     assert state.graph_loaded is False
 
 
+def test_health_helper_handles_uninitialized_runtime_state(monkeypatch):
+    monkeypatch.setattr(api_main, "state", None)
+    monkeypatch.setattr(api_main, "INNOVATIONS_AVAILABLE", False)
+
+    response = api_main._build_health_response(include_details=True)
+
+    assert response["status"] == "healthy"
+    assert response["service"] == "AegisGraph Sentinel"
+    assert response["model_loaded"] is False
+    assert response["graph_loaded"] is False
+    assert response["innovations_available"] is False
+    assert response["requests_processed"] == 0
+    assert response["uptime_seconds"] == 0.0
+
+
+def test_fallback_helpers_handle_partial_runtime_state(monkeypatch):
+    monkeypatch.setattr(
+        api_main,
+        "state",
+        types.SimpleNamespace(
+            graph_loaded=False,
+            transaction_graph=None,
+            account_profiles={},
+            mule_accounts=set(),
+        ),
+    )
+
+    result = api_main._fallback_compute_risk_score(
+        {
+            "source_account": "acct_src",
+            "target_account": "acct_dst",
+            "amount": 100.0,
+        },
+        biometrics={"hold_times": [120.0], "flight_times": [80.0]},
+    )
+
+    assert set(result) == {"risk_score", "decision", "confidence", "breakdown"}
+    assert set(result["breakdown"]) == {"graph", "velocity", "behavior", "entropy"}
+
+    explanation = api_main._fallback_generate_explanation(
+        transaction={"source_account": "acct_src", "target_account": "acct_dst"},
+        risk_result=result,
+    )
+
+    assert "explanation" in explanation
+    assert "recommended_action" in explanation
+
+
 def test_validation_error_payload_is_json_safe(api_client):
     payload = _transaction()
     payload["amount"] = -1

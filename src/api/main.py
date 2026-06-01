@@ -57,22 +57,6 @@ except ImportError as e:
         def limit(self, *args, **kwargs):
             def decorator(func):
                 return func
-
-            return decorator
-
-    except ImportError as e:
-    SLOWAPI_AVAILABLE = False
-
-    class RateLimitExceeded(Exception):
-        pass
-
-    class Limiter:
-        def __init__(self, *args, **kwargs):
-            self.key_func = kwargs.get("key_func")
-
-        def limit(self, *args, **kwargs):
-            def decorator(func):
-                return func
             return decorator
 
     class SlowAPIMiddleware:
@@ -100,6 +84,7 @@ except ImportError as e:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
     print(f"SlowAPI not available ({e}); rate limiting disabled")
+
 
 
 from ..config.settings import get_settings

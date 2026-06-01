@@ -48,7 +48,7 @@ def get_mule_scorer():
     if service is None:
         from src.features.predictive_mule_identification import PredictiveMuleScorer
         service = PredictiveMuleScorer()
-        state.services.register_service("mule_scorer", service)
+        state.services.register_service("mule_scorer", service, replace=True)
     return service
 
 
@@ -59,7 +59,7 @@ def get_voice_analyzer():
     if service is None:
         from src.features.voice_stress_analysis import VoiceStressAnalyzer
         service = VoiceStressAnalyzer()
-        state.services.register_service("voice_analyzer", service)
+        state.services.register_service("voice_analyzer", service, replace=True)
     return service
 
 
@@ -70,7 +70,7 @@ def get_aegis_oracle():
     if service is None:
         from src.features.aegis_oracle_explainer import AegisOracleExplainer
         service = AegisOracleExplainer()
-        state.services.register_service("aegis_oracle", service)
+        state.services.register_service("aegis_oracle", service, replace=True)
     return service
 
 
@@ -88,7 +88,7 @@ async def get_honeypot_manager():
             if service is None:
                 from src.features.honeypot_escrow import HoneypotEscrowManager
                 service = HoneypotEscrowManager()
-                state.services.register_service("honeypot_manager", service)
+                state.services.register_service("honeypot_manager", service, replace=True)
     return service
 
 
@@ -102,7 +102,7 @@ async def get_blockchain_manager():
             if service is None:
                 from src.features.blockchain_evidence import BlockchainEvidenceManager
                 service = BlockchainEvidenceManager()
-                state.services.register_service("blockchain_manager", service)
+                state.services.register_service("blockchain_manager", service, replace=True)
     return service
 
 
@@ -118,7 +118,7 @@ async def get_lateral_movement_detector():
                     from src.features.lateral_movement import LateralMovementDetector
                     service = LateralMovementDetector()
                     state.services.register_service(
-                        "lateral_movement_detector", service
+                        "lateral_movement_detector", service, replace=True
                     )
                 except Exception:
                     return None  # lateral movement is optional

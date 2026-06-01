@@ -1346,14 +1346,13 @@ class BlockchainEvidenceManager:
 
         try:
             transaction_hash = hashlib.sha256(transaction_id.encode()).hexdigest()
-        chain_data = {
-            'transaction_id': transaction_id,
-            'transaction_hash': transaction_hash,
-            'chain': [],
-            'verified': False,
-        }
+            chain_data = {
+                'transaction_id': transaction_id,
+                'transaction_hash': transaction_hash,
+                'chain': [],
+                'verified': False,
+            }
 
-        try:
             block_ref = self._transaction_block_index.get(transaction_hash)
             if block_ref is None:
                 chain_data['status'] = 'not_found'

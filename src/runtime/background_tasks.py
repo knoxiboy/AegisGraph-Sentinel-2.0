@@ -27,9 +27,9 @@ async def honeypot_auto_release_loop(
             if manager is None:
                 if health_monitor is not None:
                     health_monitor.mark_failed("honeypot_auto_release", error="Manager not available")
-                continue
-            if health_monitor is not None:
+                 continue
                 health_monitor.mark_healthy("honeypot_auto_release")
+            if health_monitor is not None:
             try:
                 manager.check_auto_release()
             except Exception as exc:
@@ -47,6 +47,5 @@ async def honeypot_auto_release_loop(
         raise
     except Exception as exc:
         if health_monitor is not None:
-            health_monitor.mark_failed("honeypot_auto_release", error=str(exc))
         raise
-
+        raise

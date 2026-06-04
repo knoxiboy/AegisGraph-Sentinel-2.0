@@ -78,21 +78,21 @@ class EventDispatcher:
         self._stop_requested.set()
 
         if self._task is not None:
-            # During tests (e.g. Starlette TestClient), shutdown can be triggered
-            # from a different event loop than the one that created the
-            # internal dispatcher queue/task. Cancelling first prevents the
-            # cross-loop await from crashing the teardown.
-            self._task.cancel()
             try:
+                # Graceful shutdown: allow _process_loop() to drain queued events
+                # and overflow (including critical events) before returning.
                 await self._task
             except asyncio.CancelledError:
                 pass
             except RuntimeError as exc:
                 msg = str(exc)
+                # Starlette/FastAPI TestClient teardown can trigger shutdown from a
+                # different event loop than the one that created the dispatcher.
                 if ("bound to a different event loop" in msg) or (
                     ("Queue" in msg) and ("different event loop" in msg)
                 ):
-                    # Teardown safety: ignore cross-event-loop RuntimeErrors.
+                    # Teardown safety: cancel and swallow cross-event-loop errors.
+                    self._task.cancel()
                     logger.debug("Dispatcher stop ignored cross-event-loop error: %s", msg)
                 else:
                     raise

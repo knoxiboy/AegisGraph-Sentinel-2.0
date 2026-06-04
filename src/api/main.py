@@ -96,7 +96,14 @@ except ImportError as e:
 
 from ..config.settings import get_settings
 from ..config.validation import validate_environment
-from ..exceptions import register_exception_handlers, register_observability_middleware
+from ..exceptions import (
+    AegisException,
+    register_exception_handlers,
+    register_observability_middleware,
+    ServiceUnavailableException,
+    ValidationException,
+    ProcessingException,
+)
 from ..observability import get_audit_logger, get_logger
 from ..runtime import LifecycleManager, RuntimeState, RecoveryManager, RuntimeWatchdog
 from ..runtime.background_tasks import honeypot_auto_release_loop
@@ -1718,7 +1725,7 @@ async def explain_transaction(
     # missing/invalid request bodies in tests. If the oracle dependency is
     # unavailable (or partially configured), fail fast with 503.
     if aegis_oracle is None:
-        raise HTTPException(status_code=503, detail="Aegis-Oracle unavailable")
+        raise ServiceUnavailableException("Aegis-Oracle unavailable")
     """
     Generate comprehensive explanation for a fraud decision
     
@@ -1778,9 +1785,14 @@ async def explain_transaction(
         return explanation
         
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid explainability request") from exc
+        raise ValidationException("Invalid explainability request") from exc
     except Exception as exc:
-        _raise_internal_server_error("Explainability", exc)
+        _api_logger.error(
+            f"Explainability failed: {exc}",
+            event_type="api_internal_error",
+            metadata={"operation": "Explainability", "error_type": type(exc).__name__},
+        )
+        raise AegisException("Internal Server Error")
 
 
 # Enhanced Aegis-Oracle endpoint
@@ -1831,9 +1843,14 @@ async def oracle_explain_detailed(
         }
         
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid oracle explainability request") from exc
+        raise ValidationException("Invalid oracle explainability request") from exc
     except Exception as exc:
-        _raise_internal_server_error("Oracle explainability", exc)
+        _api_logger.error(
+            f"Oracle explainability failed: {exc}",
+            event_type="api_internal_error",
+            metadata={"operation": "Oracle explainability", "error_type": type(exc).__name__},
+        )
+        raise AegisException("Internal Server Error")
 
 # DEBUG only: manually activate a honeypot via API.
 # This endpoint is ONLY registered when DEBUG env var is set to "true".

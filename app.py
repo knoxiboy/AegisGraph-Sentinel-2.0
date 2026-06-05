@@ -30,6 +30,10 @@ import numpy as np
 import networkx as nx
 from src.inference.model_comparison import build_model_explanation_comparison
 
+def _get_timestamp() -> str:
+    """Return a strict ISO 8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ) for the API."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 # Lazy loading heavy visualization and graph modules implemented inline where possible
 # Page configuration
 st.set_page_config(
@@ -45,6 +49,23 @@ MAX_BATCH_UPLOAD_BYTES = int(os.getenv("MAX_BATCH_UPLOAD_BYTES", 5 * 1024 * 1024
 BATCH_PREVIEW_ROWS = int(os.getenv("BATCH_PREVIEW_ROWS", 10))
 BATCH_CHUNK_SIZE = int(os.getenv("BATCH_CHUNK_SIZE", 50))
 BATCH_MAX_ROWS = int(os.getenv("BATCH_MAX_ROWS", 500))
+
+def display_decision_badge(decision: str):
+    """
+    Display a color-coded status badge for the given decision.
+    """
+    # Normalize to uppercase for comparison to support legacy labels if any
+    status = str(decision).upper()
+    
+    if status in ["SAFE", "ALLOW", "APPROVE"]:
+        st.success(f"✅ {status}")
+    elif status == "REVIEW":
+        st.warning(f"⚠️ {status}")
+    elif status == "BLOCK":
+        st.error(f"🛑 {status}")
+    else:
+        # Fallback for unexpected status
+        st.info(f"ℹ️ {status}")
 REQUIRED_CSV_COLUMNS = {"transaction_id", "source_account", "target_account", "amount"}
 COMMAND_CENTER_REFRESH_KEY = "command_center_live_refresh"
 COMMAND_CENTER_IO_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("COMMAND_CENTER_WORKERS", 2)))
@@ -93,10 +114,7 @@ def _build_batch_transaction(row, index: int) -> dict:
         "currency": str(row.get("currency", "INR")),
         "mode": str(row.get("mode", "UPI")),
 
-        "timestamp": str(
-            row.get("timestamp", datetime.now(timezone.utc).isoformat() + "Z")
-        ),
-        "timestamp": str(row.get("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))),
+        "timestamp": str(row.get("timestamp", _get_timestamp())),
 
     }
 
@@ -849,7 +867,7 @@ elif page == "💳 Transaction Scan":
                     "amount": float(amount),
                     "currency": currency,
                     "mode": mode,
-                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                    "timestamp": _get_timestamp(),
                 }
 
                 if device_id:
@@ -860,7 +878,10 @@ elif page == "💳 Transaction Scan":
                 # Make API call
                 try:
                     response = requests.post(
-                        f"{API_URL}/api/v1/fraud/check", json=transaction, timeout=10
+                        f"{API_URL}/api/v1/fraud/check",
+                        json=transaction,
+                        timeout=10,
+                        headers={"X-API-Key": "demo-key"},
                     )
 
                     if response.status_code == 200:
@@ -881,16 +902,17 @@ elif page == "💳 Transaction Scan":
                             )
                         with metric_cols[1]:
                             decision = result["decision"]
+                            status = str(decision).upper()
                             emoji = (
                                 "🟢"
-                                if decision == "ALLOW"
+                                if status in ["SAFE", "ALLOW", "APPROVE"]
                                 else "🟡"
-                                if decision == "REVIEW"
+                                if status == "REVIEW"
                                 else "🔴"
                             )
                             st.metric(
                                 "Decision",
-                                f"{emoji} {decision} ({decision.title()} decision)",
+                                f"{emoji} {status}",
                             )
                         with metric_cols[2]:
                             st.metric("Confidence", f"{result['confidence']:.1%}")
@@ -1052,7 +1074,10 @@ elif page == "📁 Batch Triage":
 
                         try:
                             response = requests.post(
-                                f"{API_URL}/api/v1/fraud/check", json=txn, timeout=30
+                                f"{API_URL}/api/v1/fraud/check",
+                                json=txn,
+                                timeout=30,
+                                headers={"X-API-Key": "demo-key"},
                             )
                             if response.status_code == 200:
                                 result = response.json()

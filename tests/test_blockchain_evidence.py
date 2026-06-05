@@ -2,7 +2,11 @@
 
 import json
 import os
+import hashlib
+import time
 from pathlib import Path
+
+import pytest
 
 from src.features import blockchain_evidence as be
 from src.features.blockchain_evidence import BlockchainEvidenceManager
@@ -49,22 +53,43 @@ def test_verify_evidence_recovers_from_journal_after_restart(tmp_path):
     assert result["details"]["storage_backend"] == "journal"
 
 
-def test_export_legal_proceedings_uses_durable_record_after_restart(tmp_path):
+def test_export_legal_proceedings_uses_durable_record_after_restart(tmp_path, monkeypatch):
     first_manager = _manager(tmp_path)
     evidence = _seal(first_manager)
+    monkeypatch.setenv("AEGIS_LEGAL_EXPORT_TOKEN_HASH", hashlib.sha256(b"legal-token").hexdigest())
+    monkeypatch.setenv("AEGIS_LEGAL_EXPORT_AUTHORITY_ALLOWLIST", "CBI,Police Dept")
 
     restarted_manager = _manager(tmp_path)
     export = restarted_manager.export_for_legal_proceedings(
         evidence_id=evidence.evidence_id,
         case_number="CASE-149",
         requesting_authority="CBI",
-        authorization_token="token-149",
+        authorization_token="legal-token",
     )
 
     assert export["authorized_by"] == "CBI"
     assert export["package"]["evidence"]["evidence_id"] == evidence.evidence_id
     assert export["package"]["chain_verification"]["verified"] is True
     assert export["chain_of_custody"][-1]["event"] == "legal_export_generated"
+
+
+def test_export_legal_proceedings_rejects_unauthorized_authority(tmp_path, monkeypatch):
+    first_manager = _manager(tmp_path)
+    evidence = _seal(first_manager)
+    monkeypatch.setenv("AEGIS_LEGAL_EXPORT_TOKEN_HASH", hashlib.sha256(b"legal-token").hexdigest())
+    monkeypatch.setenv("AEGIS_LEGAL_EXPORT_AUTHORITY_ALLOWLIST", "CBI")
+
+    restarted_manager = _manager(tmp_path)
+
+    with pytest.raises(PermissionError) as exc_info:
+        restarted_manager.export_for_legal_proceedings(
+            evidence_id=evidence.evidence_id,
+            case_number="CASE-150",
+            requesting_authority="Police Dept",
+            authorization_token="legal-token",
+        )
+
+    assert "not authorized" in str(exc_info.value).lower()
 
 
 def test_journal_refresh_seeks_from_previous_offset(tmp_path, monkeypatch):
@@ -150,3 +175,31 @@ def test_load_evidence_record_uses_reverse_index_without_chain_scan(tmp_path, mo
     assert record is not None
     assert record["_storage"] == "memory"
     assert record["evidence_id"] == expected["evidence_id"]
+
+
+def test_get_statistics_reuses_fresh_chain_integrity_cache(tmp_path, monkeypatch):
+    manager = _manager(tmp_path)
+    manager._redis._client = None
+
+    class GuardNode:
+        def __init__(self):
+            self.calls = 0
+            self.node_id = "guard"
+            self.chain = [{"hash": "head"}]
+
+        def verify_chain_integrity(self):
+            self.calls += 1
+            raise AssertionError("fresh cache should avoid chain verification")
+
+    guard = GuardNode()
+    manager.nodes = [guard]
+    manager._chain_integrity_cache = True
+    manager._chain_integrity_cache_checked_at = time.time()
+    manager._chain_integrity_cache_ttl_seconds = 300.0
+
+    first = manager.get_statistics()
+    second = manager.get_statistics()
+
+    assert first["chain_verified"] is True
+    assert second["chain_verified"] is True
+    assert guard.calls == 0

@@ -14,11 +14,19 @@ Features extracted:
 - Rhythm consistency
 """
 
+import math
 import numpy as np
 import torch
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from scipy.stats import variation
+
+
+def _safe_float(value: float, fallback: float = 0.0) -> float:
+    """Replace NaN or infinity with a safe fallback value."""
+    if math.isnan(value) or math.isinf(value):
+        return fallback
+    return value
 
 
 @dataclass
@@ -83,6 +91,7 @@ class KeystrokeDynamicsAnalyzer:
         
         # Extract timing features
         hold_times = [e.release_time - e.press_time for e in events]
+        press_times = [e.press_time for e in events]
         flight_times = [
             events[i+1].press_time - events[i].release_time
             for i in range(len(events) - 1)
@@ -93,30 +102,40 @@ class KeystrokeDynamicsAnalyzer:
         if session_duration <= 0:
             return self._empty_features()
 
+        if len(press_times) > 2:
+            press_deltas = np.diff(press_times)
+            if len(press_deltas) > 1 and np.mean(press_deltas) > 0:
+                interval_variability = variation(press_deltas)
+            else:
+                interval_variability = 0.0
+        else:
+            interval_variability = 0.0
+
         features = {
             # Hold time statistics (ms)
-            'hold_time_mean': np.mean(hold_times) * 1000,
-            'hold_time_std': np.std(hold_times) * 1000,
-            'hold_time_cv': variation(hold_times) if len(hold_times) > 1 else 0.0,
-            'hold_time_min': np.min(hold_times) * 1000,
-            'hold_time_max': np.max(hold_times) * 1000,
+            'hold_time_mean': _safe_float(np.mean(hold_times) * 1000),
+            'hold_time_std': _safe_float(np.std(hold_times) * 1000),
+            'hold_time_cv': _safe_float(variation(hold_times)) if len(hold_times) > 1 else 0.0,
+            'hold_time_min': _safe_float(np.min(hold_times) * 1000),
+            'hold_time_max': _safe_float(np.max(hold_times) * 1000),
             
             # Flight time statistics (ms)
-            'flight_time_mean': np.mean(flight_times) * 1000 if flight_times else 0.0,
-            'flight_time_std': np.std(flight_times) * 1000 if flight_times else 0.0,
-            'flight_time_cv': variation(flight_times) if len(flight_times) > 1 else 0.0,
+            'flight_time_mean': _safe_float(np.mean(flight_times) * 1000) if flight_times else 0.0,
+            'flight_time_std': _safe_float(np.std(flight_times) * 1000) if flight_times else 0.0,
+            'flight_time_cv': _safe_float(variation(flight_times)) if len(flight_times) > 1 else 0.0,
             
             # Typing speed
             'wpm': self._compute_wpm(keystroke_sequence),
-            'chars_per_second': len(events) / session_duration,
+            'chars_per_second': _safe_float(len(events) / session_duration),
             
             # Error metrics
             'error_rate': self._compute_error_rate(events),
             'backspace_count': sum(1 for e in events if e.is_backspace),
-            'backspace_ratio': sum(1 for e in events if e.is_backspace) / len(events),
+            'backspace_ratio': _safe_float(sum(1 for e in events if e.is_backspace) / len(events)),
             
             # Rhythm consistency
             'rhythm_consistency': self._compute_rhythm_consistency(flight_times),
+            'timestamp_interval_cv': _safe_float(interval_variability),
             
             # Session metadata
             'total_events': len(events),
@@ -131,13 +150,13 @@ class KeystrokeDynamicsAnalyzer:
         features = self.extract_features(sequence)
         stress = self.detect_stress(features)
 
-        raw_timestamps = [float(event.get('timestamp', 0.0)) for event in events or [] if isinstance(event, dict) and 'timestamp' in event]
-        if len(raw_timestamps) > 2:
-            intervals = np.diff(raw_timestamps)
-            if len(intervals) > 1:
-                interval_cv = variation(intervals) if np.mean(intervals) > 0 else 0.0
-                stress['stress_score'] = min(stress['stress_score'] + max(interval_cv - 0.3, 0.0) * 0.5, 1.0)
-                stress['is_stressed'] = stress['stress_score'] > self.stress_threshold
+        interval_cv = features.get('timestamp_interval_cv', 0.0)
+        if interval_cv > 0:
+            stress['stress_score'] = min(
+                stress['stress_score'] + max(interval_cv - 0.3, 0.0) * 0.5,
+                1.0,
+            )
+            stress['is_stressed'] = stress['stress_score'] > self.stress_threshold
 
         return {**features, **stress}
     
@@ -192,8 +211,8 @@ class KeystrokeDynamicsAnalyzer:
         )
         
         return {
-            'stress_score': stress_score,
-            'is_stressed': stress_score > self.stress_threshold,
+            'stress_score': _safe_float(stress_score),
+            'is_stressed': _safe_float(stress_score) > self.stress_threshold,
             'hold_cv_stress': hold_cv_stress,
             'wpm_stress': wpm_stress,
             'error_stress': error_stress,
@@ -230,10 +249,10 @@ class KeystrokeDynamicsAnalyzer:
         if len(flight_times) < 2:
             return 0.5
         
-        cv = variation(flight_times)
+        cv = _safe_float(variation(flight_times))
         # Map CV to consistency score (lower CV = higher consistency)
         consistency = 1.0 / (1.0 + cv)
-        return consistency
+        return _safe_float(consistency, 0.5)
     
     def _empty_features(self) -> Dict[str, float]:
         """Return empty feature dict"""
@@ -252,6 +271,7 @@ class KeystrokeDynamicsAnalyzer:
             'backspace_count': 0,
             'backspace_ratio': 0.0,
             'rhythm_consistency': 0.5,
+            'timestamp_interval_cv': 0.0,
             'total_events': 0,
             'session_duration': 0.0,
         }

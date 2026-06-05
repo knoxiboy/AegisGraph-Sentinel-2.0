@@ -63,6 +63,35 @@ class TestKeystrokeDynamics:
         # Stressed typing should have higher stress score
         assert features['stress_score'] > 0.3
 
+    def test_analyze_does_not_reiterate_raw_events(self):
+        """Test analyze() reuses extracted interval metrics instead of rescanning input."""
+        analyzer = KeystrokeDynamicsAnalyzer()
+
+        class OneShotEvents:
+            def __init__(self, payload):
+                self._payload = payload
+                self._consumed = False
+
+            def __iter__(self):
+                if self._consumed:
+                    raise AssertionError("analyze() should not iterate raw events twice")
+                self._consumed = True
+                return iter(self._payload)
+
+        events = OneShotEvents([
+            {'key': 'a', 'timestamp': 0.0, 'event_type': 'keydown'},
+            {'key': 'a', 'timestamp': 0.1, 'event_type': 'keyup'},
+            {'key': 'b', 'timestamp': 0.15, 'event_type': 'keydown'},
+            {'key': 'b', 'timestamp': 0.25, 'event_type': 'keyup'},
+            {'key': 'c', 'timestamp': 0.3, 'event_type': 'keydown'},
+            {'key': 'c', 'timestamp': 0.4, 'event_type': 'keyup'},
+        ])
+
+        features = analyzer.analyze(events)
+
+        assert 'timestamp_interval_cv' in features
+        assert features['stress_score'] >= 0
+
 
 class TestVelocityCalculator:
     """Test transaction velocity calculator"""
@@ -268,6 +297,48 @@ class TestFeatureIntegration:
 
         assert neighbors == {'B', 'C', 'D'}
         assert len(neighbors) == 3
+
+    def test_all_entropy_features_share_one_neighborhood_snapshot(self, monkeypatch):
+        """Test multi-feature entropy reuse avoids repeated neighborhood walks."""
+        calculator = GraphEntropyCalculator()
+        sentinel_graph = object()
+        build_calls = []
+        profile = {
+            'direct_neighbors': {'B', 'C'},
+            'k_hop_neighbors': {'B', 'C', 'D'},
+            'subgraph': object(),
+            'neighbor_degrees': [2, 2],
+            'edges_between_neighbors': 1,
+        }
+
+        def traced_build(node, graph):
+            build_calls.append((node, graph))
+            return profile
+
+        monkeypatch.setattr(calculator, "_build_neighborhood_profile", traced_build)
+
+        features = calculator.compute_all_entropy_features(
+            'A',
+            sentinel_graph,
+            node_attributes={
+                'A': {'type': 'source'},
+                'B': {'type': 'relay'},
+                'C': {'type': 'relay'},
+            },
+            edge_timestamps={
+                ('A', 'B'): 10.0,
+                ('A', 'C'): 12.0,
+            },
+            edge_amounts={
+                ('A', 'B'): 100.0,
+                ('A', 'C'): 120.0,
+            },
+            current_time=20.0,
+        )
+
+        assert build_calls == [('A', sentinel_graph)]
+        assert features['degree_entropy'] >= 0
+        assert features['structural_entropy'] >= 0
 
 
 class TestPredictiveMuleCache:

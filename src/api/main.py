@@ -133,6 +133,8 @@ from .schemas import (
     VoiceAnalysisRequest,
     VoiceAnalysisResponse,
     HoneypotStatus,
+    AlertSummaryRequest,
+    AlertSummaryResponse,
 )
 from .security import require_api_key, Role, require_role
 from .validators import StrictRateLimit
@@ -2576,6 +2578,50 @@ async def blast_radius_analysis(request: BlastRadiusRequest):
         processing_time_ms=round(processing_time_ms, 3),
         timestamp=timestamp,
     )
+
+
+@app.post(
+    "/api/v1/alerts/summarize",
+    response_model=AlertSummaryResponse,
+    tags=["Alerts"],
+    summary="Generate AI-powered summary for anomaly alerts",
+    description="Takes complex alert JSON and uses Gemini to return a 2-sentence plain English summary.",
+    dependencies=[Depends(require_role(Role.ANALYST))]
+)
+async def summarize_alert(request: AlertSummaryRequest):
+    start_time = time.time()
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured")
+    
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        
+        model = genai.GenerativeModel('gemini-1.5-flash',
+            system_instruction="You are a cybersecurity expert. Summarize this anomaly alert in exactly 2 plain English sentences for a non-technical analyst."
+        )
+        
+        alert_json = json.dumps(request.alert_data, indent=2)
+        response = await asyncio.to_thread(model.generate_content, alert_json)
+        
+        summary = response.text.strip()
+        
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        return AlertSummaryResponse(
+            summary=summary,
+            processing_time_ms=processing_time_ms
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="google-generativeai package is not installed")
+    except Exception as e:
+        _api_logger.error(
+            f"Failed to generate alert summary: {e}",
+            event_type="api_internal_error",
+            metadata={"operation": "Alert summary", "error_type": type(e).__name__},
+        )
+        raise HTTPException(status_code=500, detail="Failed to generate AI summary")
 
 
 def main():

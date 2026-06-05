@@ -24,9 +24,9 @@ from typing import Any, Dict, List, Optional
 import networkx as nx
 import numpy as np
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from .websocket_manager import WebSocketManager
 
 ws_manager = WebSocketManager()
@@ -236,19 +236,21 @@ def _build_health_response(include_details: bool) -> dict[str, Any]:
         "service": "AegisGraph Sentinel",
     }
 
+    start_time = getattr(runtime_state, "start_time", None)
+    uptime = time.time() - start_time if isinstance(start_time, (int, float)) else 0.0
+
+    response["version"] = "2.0.0"
+    response["uptime_seconds"] = uptime
+
     if not include_details:
         return response
 
-    start_time = getattr(runtime_state, "start_time", None)
-    uptime = time.time() - start_time if isinstance(start_time, (int, float)) else 0.0
     response.update(
         {
-            "version": "2.0.0",
             "model_loaded": getattr(runtime_state, "model_loaded", False),
             "graph_loaded": getattr(runtime_state, "graph_loaded", False),
             "innovations_available": INNOVATIONS_AVAILABLE,
             "requests_processed": getattr(runtime_state, "requests_processed", 0),
-            "uptime_seconds": uptime,
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
     )
@@ -1702,6 +1704,56 @@ async def health_check(verbose: bool = False):
     Returns service status and basic statistics
     """
     return _build_health_response(include_details=verbose)
+
+
+@app.get("/readiness", tags=["System"])
+async def readiness_probe(response: Response):
+    """Readiness probe"""
+    runtime_state = state
+    health_monitor = getattr(getattr(runtime_state, "runtime", None), "health_monitor", None)
+    
+    overall_status = "healthy"
+    if health_monitor is not None:
+        overall_status = health_monitor.get_overall_status()
+        
+    model_loaded = getattr(runtime_state, "model_loaded", False)
+    graph_loaded = getattr(runtime_state, "graph_loaded", False)
+    
+    is_ready = overall_status == "healthy" and model_loaded and graph_loaded
+    
+    if not is_ready:
+        response.status_code = 503
+        return {
+            "status": "unavailable",
+            "details": overall_status,
+            "model_loaded": model_loaded,
+            "graph_loaded": graph_loaded
+        }
+        
+    return {"status": "ready"}
+
+
+@app.get("/metrics", response_class=PlainTextResponse, tags=["System"])
+async def get_metrics():
+    """Prometheus metrics endpoint"""
+    runtime_state = state
+    requests = getattr(runtime_state, "requests_processed", 0)
+    total_time = getattr(runtime_state, "total_processing_time", 0.0)
+    latency = total_time / requests if requests > 0 else 0.0
+    cache_hits = getattr(runtime_state, "cache_hits", 0)
+    
+    metrics = [
+        "# HELP api_requests_total Total API requests processed",
+        "# TYPE api_requests_total counter",
+        f"api_requests_total {requests}",
+        "# HELP api_latency_seconds Average request latency in seconds",
+        "# TYPE api_latency_seconds gauge",
+        f"api_latency_seconds {latency:.6f}",
+        "# HELP cache_hits_total Total cache hits",
+        "# TYPE cache_hits_total counter",
+        f"cache_hits_total {cache_hits}"
+    ]
+    return "\n".join(metrics) + "\n"
 
 
 @app.get("/stats", response_model=StatsResponse, tags=["General"], dependencies=[Depends(require_api_key)])

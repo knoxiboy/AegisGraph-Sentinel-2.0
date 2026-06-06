@@ -204,6 +204,23 @@ class TransactionCheckResponse(BaseModel):
 
 class BatchTransactionRequest(BaseModel):
     """Request schema for batch transaction checking"""
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "transactions": [
+                    {
+                        "transaction_id": "TXN123456789",
+                        "source_account": "ACC987654321",
+                        "target_account": "ACC123456789",
+                        "amount": 50000.00,
+                        "currency": "INR",
+                        "mode": "UPI",
+                        "timestamp": "2026-02-26T14:30:00Z"
+                    }
+                ]
+            }
+        }
+    )
     transactions: List[TransactionCheckRequest] = Field(description="List of transactions to check")
     
     @field_validator('transactions')
@@ -216,6 +233,18 @@ class BatchTransactionRequest(BaseModel):
 
 class BatchTransactionResponse(BaseModel):
     """Response schema for batch transaction checking"""
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "results": [],
+                "total_processed": 1,
+                "total_blocked": 0,
+                "total_review": 0,
+                "total_allowed": 1,
+                "processing_time_ms": 45.2
+            }
+        }
+    )
     results: List[TransactionCheckResponse]
     total_processed: int
     total_blocked: int
@@ -226,6 +255,21 @@ class BatchTransactionResponse(BaseModel):
 
 class HealthCheckResponse(BaseModel):
     """Health check response"""
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "status": "operational",
+                "service": "AegisGraph Sentinel 2.0",
+                "version": "2.0.0",
+                "model_loaded": True,
+                "graph_loaded": True,
+                "innovations_available": True,
+                "uptime_seconds": 3600.5,
+                "requests_processed": 1500,
+                "timestamp": "2026-06-06T12:00:00Z"
+            }
+        }
+    )
     status: str = Field(description="Service status")
     service: str = Field(default="AegisGraph Sentinel", description="Service name")
     version: Optional[str] = Field(default=None, description="API version")
@@ -240,6 +284,22 @@ class HealthCheckResponse(BaseModel):
 
 class ModelInfo(BaseModel):
     """Model information"""
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "model_name": "HTGNN-Fraud-Detector",
+                "version": "v1.2",
+                "architecture": "Heterogeneous Temporal Graph Attention Network",
+                "parameters": 5000000,
+                "trained_on": "2026-01-15T00:00:00Z",
+                "performance_metrics": {
+                    "precision": 0.968,
+                    "recall": 0.942,
+                    "f1_score": 0.955
+                }
+            }
+        }
+    )
     model_name: str
     version: str
     architecture: str
@@ -250,6 +310,24 @@ class ModelInfo(BaseModel):
 
 class StatsResponse(BaseModel):
     """Statistics response"""
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "total_requests": 1500,
+                "decisions": {
+                    "ALLOW": 1400,
+                    "REVIEW": 80,
+                    "BLOCK": 20
+                },
+                "avg_risk_score": 0.15,
+                "avg_processing_time_ms": 112.5,
+                "uptime_seconds": 3600.5,
+                "total_checks": 1500,
+                "flagged_transactions": 100,
+                "average_response_time": 112.5
+            }
+        }
+    )
     total_requests: int
     decisions: Dict[str, int]
     avg_risk_score: float
@@ -262,6 +340,15 @@ class StatsResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Error response schema"""
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "error": "Authentication Failed",
+                "detail": "Invalid API Key provided",
+                "timestamp": "2026-06-06T12:00:00Z"
+            }
+        }
+    )
     error: str = Field(description="Error message")
     detail: Optional[str] = Field(default=None, description="Detailed error information")
     timestamp: str = Field(description="Error timestamp")

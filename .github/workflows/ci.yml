@@ -47,9 +47,8 @@ jobs:
 
     - name: Run Forensic Core & Test Suite Verification
       env:
-        AEGIS_API_KEY_HASHES: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        AEGIS_GRAPH_SHA256: "dummy_hash_for_headless_ci_runner_nodes"
-        RUN_COVERAGE: ${{ matrix.run_coverage }}
+        AEGIS_API_KEY_HASHES: ${{ secrets.AEGIS_API_KEY_HASHES }}
+        AEGIS_GRAPH_SHA256: ${{ secrets.AEGIS_GRAPH_SHA256 }}
       run: |
         # Run full suite with optional coverage (only enabled on one matrix leg).
         if [ "${RUN_COVERAGE:-false}" = "true" ]; then
@@ -60,8 +59,8 @@ jobs:
 
     - name: Verify API Entry Point Compilation Surface
       env:
-        AEGIS_API_KEY_HASHES: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        AEGIS_GRAPH_SHA256: "dummy_hash_for_headless_ci_runner_nodes"
+        AEGIS_API_KEY_HASHES: ${{ secrets.AEGIS_API_KEY_HASHES }}
+        AEGIS_GRAPH_SHA256: ${{ secrets.AEGIS_GRAPH_SHA256 }}
       run: |
         # Ensure the main route entry definitions can compile flawlessly in production
         python -m py_compile src/api/main.py

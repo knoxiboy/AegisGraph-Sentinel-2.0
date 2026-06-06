@@ -2082,7 +2082,12 @@ async def check_batch_transactions(request: BatchTransactionRequest):
 
     async def _process_transaction(txn_request):
         async with semaphore:
-            return await check_transaction(txn_request)
+            return await check_transaction(
+                txn_request,
+                lateral_movement_detector=await get_lateral_movement_detector(),
+                honeypot_manager=await get_honeypot_manager(),
+                blockchain_manager=await get_blockchain_manager(),
+            )
 
     async def _stream_batch_response():
         api_to_internal = {

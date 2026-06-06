@@ -41,15 +41,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          COMMENTER: ${{ github.event.comment.user.login }}
-          ISSUE_CONTEXT: ${{ json(github.event.issue) }}
+          EVENT_PATH: ${{ github.event_path }}
         run: |
           import json, urllib.request, os, time
 
           token = os.getenv('GITHUB_TOKEN')
           repo = os.getenv('REPO')
           event_name = os.getenv('EVENT_NAME')
+          event_path = os.getenv('EVENT_PATH')
 
           headers = {
               "Authorization": f"Bearer {token}",
@@ -72,8 +71,7 @@ jobs:
                   if trigger == 'workflow_dispatch':
                       body = f"⚡ @{issue_creator}, this open issue has been automatically assigned to you during a repository-wide history sweep! 🚀"
                   elif trigger == 'issue_comment':
-                      commenter = os.getenv('COMMENTER')
-                      body = f"✅ @{issue_creator} (the issue creator) has been assigned. @{commenter}, thanks for looking into this!"
+                      body = f"✅ @{issue_creator} (the issue creator) has been assigned. Thanks for looking into this!"
                   else:
                       body = f"✅ @{issue_creator}, you have been automatically assigned to this issue. Good luck! 🚀"
 
@@ -130,18 +128,21 @@ jobs:
           if event_name == 'workflow_dispatch':
               run_bulk_crawl()
           else:
-              # Read context parameters for automated event hooks
-              issue_env = os.getenv('ISSUE_CONTEXT')
-              if issue_env:
-                  issue = json.loads(issue_env)
-                  issue_num = issue.get('number')
-                  issue_creator = issue['user']['login']
-                  assignees = [a['login'] for a in issue.get('assignees', [])]
+              # Safely parse context parameters from the runner event file
+              if event_path and os.path.exists(event_path):
+                  with open(event_path, 'r') as f:
+                      event_data = json.load(f)
                   
-                  # Use the commenter handle if someone manually inputs `/assign` on an issue
-                  if event_name == 'issue_comment':
-                      commenter = os.getenv('COMMENTER')
-                      process_single_assignment(issue_num, commenter, assignees, 'issue_comment')
-                  else:
-                      process_single_assignment(issue_num, issue_creator, assignees, 'issues')
+                  issue = event_data.get('issue')
+                  if issue:
+                      issue_num = issue.get('number')
+                      issue_creator = issue['user']['login']
+                      assignees = [a['login'] for a in issue.get('assignees', [])]
+                      
+                      # Use the commenter handle if someone manually inputs `/assign` on an issue
+                      if event_name == 'issue_comment':
+                          commenter = event_data.get('comment', {}).get('user', {}).get('login')
+                          process_single_assignment(issue_num, commenter, assignees, 'issue_comment')
+                      else:
+                          process_single_assignment(issue_num, issue_creator, assignees, 'issues')
         shell: python

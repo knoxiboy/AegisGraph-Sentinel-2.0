@@ -1425,13 +1425,34 @@ async def lifespan(app: FastAPI):
 
         await lifecycle_manager.shutdown()
 
+import os
+SWAGGER_ENABLED = os.getenv("SWAGGER_ENABLED", "true").lower() == "true"
+
 # Initialize FastAPI app
 app = FastAPI(
-    title="AegisGraph Sentinel 2.0",
-    description="Real-Time Cross-Channel Mule Account Detection & Neutralization API",
+    title="AegisGraph Sentinel 2.0 API",
+    description="Real-Time Cross-Channel Mule Account Detection & Neutralization API.\n\n"
+                "### Authentication\n"
+                "All protected endpoints require an API Key via the `X-API-Key` header. "
+                "Use the **Authorize** button to authenticate globally.",
     version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    contact={
+        "name": "AegisGraph Team",
+        "email": "support@aegisgraph.internal",
+    },
+    license_info={
+        "name": "Proprietary",
+    },
+    openapi_tags=[
+        {"name": "Health", "description": "System health and liveness checks"},
+        {"name": "Monitoring", "description": "System statistics and model metrics"},
+        {"name": "Detection", "description": "Real-time fraud detection and risk scoring"},
+        {"name": "Analytics", "description": "Graph analytics and alert summarization"},
+        {"name": "Administration", "description": "Honeypot management and blockchain evidence"}
+    ],
+    docs_url="/docs" if SWAGGER_ENABLED else None,
+    redoc_url="/redoc" if SWAGGER_ENABLED else None,
+    openapi_url="/openapi.json" if SWAGGER_ENABLED else None,
     lifespan=lifespan
 )
 
@@ -1468,7 +1489,7 @@ register_observability_middleware(app)
 
 
 
-@app.get("/", tags=["General"])
+@app.get("/", tags=["Health"])
 async def root():
     """Root endpoint"""
     return {
@@ -1485,7 +1506,7 @@ async def root():
     "/api/v1/health",
     response_model=HealthCheckResponse,
     response_model_exclude_none=True,
-    tags=["System"],
+    tags=["Health"],
     dependencies=[Depends(_require_verbose_health_access)],
 )
 async def health_check_v1(verbose: bool = False):
@@ -1494,7 +1515,7 @@ async def health_check_v1(verbose: bool = False):
 
 @app.get(
     "/health/liveness",
-    tags=["General"],
+    tags=["Health"],
     summary="Lightweight liveness probe",
 )
 async def liveness():
@@ -1509,7 +1530,7 @@ async def liveness():
     "/health",
     response_model=HealthCheckResponse,
     response_model_exclude_none=True,
-    tags=["General"],
+    tags=["Health"],
     dependencies=[Depends(_require_verbose_health_access)],
 )
 async def health_check(verbose: bool = False):
@@ -1521,7 +1542,7 @@ async def health_check(verbose: bool = False):
     return _build_health_response(include_details=verbose)
 
 
-@app.get("/stats", response_model=StatsResponse, tags=["General"], dependencies=[Depends(require_role(Role.AUDITOR))])
+@app.get("/stats", response_model=StatsResponse, tags=["Monitoring"], dependencies=[Depends(require_role(Role.AUDITOR))])
 async def get_stats():
     """
     Get service statistics
@@ -1550,7 +1571,7 @@ async def get_stats():
 @app.post(
     "/api/v1/fraud/check",
     response_model=TransactionCheckResponse,
-    tags=["Fraud Detection"],
+    tags=["Detection"],
     summary="Check transaction for fraud",
     description="Analyze a single transaction for fraud risk using HTGNN and behavioral biometrics",
     dependencies=[Depends(require_role(Role.ANALYST)), Depends(StrictRateLimit(ip_limit=60, api_key_limit=300))]
@@ -1871,7 +1892,7 @@ async def check_transaction(
     "/api/v1/explain",
     include_in_schema=False,
 
-    tags=["Explainability - Aegis-Oracle"],
+    tags=["Analytics"],
     summary="Generate AI-explainable decision explanation",
     description="Innovation 5: Aegis-Oracle generates regulatory-compliant explanations for all fraud decisions. Includes causal factors, evidence,  and legal admissibility.",
     dependencies=[Depends(require_role(Role.ANALYST))]
@@ -1957,7 +1978,7 @@ async def explain_transaction(
 # Enhanced Aegis-Oracle endpoint
 @app.post(
     "/api/v1/oracle/explain",
-    tags=["Explainability - Aegis-Oracle"],
+    tags=["Analytics"],
     summary="Get comprehensive AI reasoning for fraud decisions",
     description="Advanced Aegis-Oracle endpoint with full forensic analysis and causal reasoning",
     dependencies=[Depends(require_role(Role.ANALYST))]
@@ -2089,7 +2110,8 @@ async def fraud_stream_websocket(websocket: WebSocket, client_id: str):
 
 @app.post(
     "/api/v1/fraud/batch",
-    tags=["Fraud Detection"],
+    response_model=BatchTransactionResponse,
+    tags=["Detection"],
     summary="Check multiple transactions",
     description="Batch processing of multiple transactions for fraud detection",
     dependencies=[Depends(require_role(Role.ANALYST)), Depends(StrictRateLimit(ip_limit=10, api_key_limit=50))]
@@ -2195,7 +2217,7 @@ async def check_batch_transactions(request: BatchTransactionRequest):
     return StreamingResponse(_stream_batch_response(), media_type="application/json")
 
 
-@app.get("/api/v1/model/info", tags=["Model"], dependencies=[Depends(require_role(Role.VIEWER))])
+@app.get("/api/v1/model/info", tags=["Monitoring"], dependencies=[Depends(require_role(Role.VIEWER))])
 async def get_model_info():
     """
     Get information about the loaded model
@@ -2230,7 +2252,7 @@ async def get_model_info():
 @app.post(
     "/api/v1/voice/analyze",
     response_model=VoiceAnalysisResponse,
-    tags=["Innovation - Voice Stress"],
+    tags=["Detection"],
     summary="Analyze voice stress during transaction",
     description="Innovation 5: Real-time voice stress analysis to detect coercion or AI generation",
     dependencies=[Depends(require_role(Role.ANALYST)), Depends(StrictRateLimit(ip_limit=5, api_key_limit=20))]
@@ -2306,7 +2328,7 @@ async def analyze_voice(
 @app.post(
     "/api/v1/accounts/score-opening",
     response_model=AccountOpeningResponse,
-    tags=["Innovation - Predictive Mule"],
+    tags=["Detection"],
     summary="Score account opening for mule risk",
     description="Innovation 4: Predicts mule accounts before first transaction using 12 features",
     dependencies=[Depends(require_role(Role.ANALYST))]
@@ -2373,7 +2395,7 @@ def score_account_opening(
 @app.post(
     "/api/v1/mule/assess",
     response_model=AccountOpeningResponse,
-    tags=["Innovation - Predictive Mule"],
+    tags=["Detection"],
     summary="Assess account mule risk",
     description="Innovation 3: Alias for mule assessment endpoint",
     dependencies=[Depends(require_role(Role.ANALYST))]
@@ -2386,7 +2408,7 @@ def assess_mule_risk(request: AccountOpeningRequest):
 @app.get(
     "/api/v1/honeypot/active",
     response_model=HoneypotListResponse,
-    tags=["Innovation - Honeypot Escrow"],
+    tags=["Administration"],
     summary="List active honeypot traps",
     description="Innovation 2: View all active deceptive containment operations",
     dependencies=[Depends(require_role(Role.ADMIN))],
@@ -2438,7 +2460,7 @@ async def list_active_honeypots(
 @app.get(
     "/api/v1/honeypot/stats",
     response_model=HoneypotStatsResponse,
-    tags=["Innovation - Honeypot Escrow"],
+    tags=["Administration"],
     summary="Get honeypot system statistics",
     description="Innovation 2: View performance metrics including arrest rate and recovery amount",
     dependencies=[Depends(require_role(Role.ADMIN))],
@@ -2475,7 +2497,7 @@ async def get_honeypot_stats(
 @app.post(
     "/api/v1/blockchain/seal",
     response_model=BlockchainEvidenceResponse,
-    tags=["Innovation - Blockchain Evidence"],
+    tags=["Administration"],
     summary="Seal evidence in blockchain",
     description="Innovation 6: Create immutable evidence record for legal admissibility",
     dependencies=[Depends(require_role(Role.ANALYST))]
@@ -2522,7 +2544,7 @@ async def seal_evidence(
 @app.get(
     "/api/v1/blockchain/verify/{evidence_id}",
     response_model=BlockchainVerificationResponse,
-    tags=["Innovation - Blockchain Evidence"],
+    tags=["Administration"],
     summary="Verify blockchain evidence",
     description="Innovation 6: Verify integrity and authenticity of sealed evidence",
     dependencies=[Depends(require_role(Role.VIEWER))]
@@ -2562,7 +2584,7 @@ async def verify_evidence(
 @app.post(
     "/api/v1/blockchain/export",
     response_model=LegalExportResponse,
-    tags=["Innovation - Blockchain Evidence"],
+    tags=["Administration"],
     summary="Export evidence for legal proceedings",
     description="Innovation 6: Generate court-admissible evidence package",
     dependencies=[Depends(require_role(Role.ADMIN))]
@@ -2641,7 +2663,7 @@ def _run_blast_radius(
 @app.post(
     "/api/v1/graph/blast-radius",
     response_model=BlastRadiusResponse,
-    tags=["Graph Analytics"],
+    tags=["Analytics"],
     summary="Blast-radius contagion analysis",
     description=(
         "Starting from a single flagged/compromised node, perform a bounded graph "
@@ -2783,7 +2805,7 @@ async def blast_radius_analysis(request: BlastRadiusRequest):
 @app.post(
     "/api/v1/alerts/summarize",
     response_model=AlertSummaryResponse,
-    tags=["Alerts"],
+    tags=["Analytics"],
     summary="Generate AI-powered summary for anomaly alerts",
     description="Takes complex alert JSON and uses Gemini to return a 2-sentence plain English summary.",
     dependencies=[Depends(require_role(Role.ANALYST))]

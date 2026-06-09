@@ -1073,3 +1073,245 @@ class GraphStatsResponse(BaseModel):
     graph_density: float
     graph_connected_components: int
     processing_time_ms: float
+
+
+# =============================================================================
+# Predictive Intelligence Schemas
+# =============================================================================
+
+class SimulationScenarioRequest(BaseModel):
+    """Request to create a simulation scenario."""
+    simulation_type: str
+    source_entity_ids: List[str] = []
+    parameters: Dict[str, Any] = {}
+    use_template: bool = True
+
+
+class SimulationScenarioResponse(BaseModel):
+    """Response containing simulation scenario."""
+    scenario_id: str
+    simulation_type: str
+    source_entity_ids: List[str]
+    parameters: Dict[str, Any]
+    status: str
+    created_at: str
+    created_by: str
+
+
+class SimulationResultResponse(BaseModel):
+    """Response containing simulation result."""
+    scenario_id: str
+    predicted_outcomes: List[Dict[str, Any]]
+    risk_score: float
+    affected_entities: List[str]
+    confidence: float
+    processing_time_ms: float
+    timestamp: str
+
+
+class ForecastRequest(BaseModel):
+    """Request to forecast risk."""
+    entity_id: str
+    current_risk: float
+    forecast_period: str = "DAY_1"
+
+
+class ForecastResultResponse(BaseModel):
+    """Response containing forecast result."""
+    entity_id: str
+    forecast_period: str
+    risk_score: float
+    confidence: float
+    factors: List[Dict[str, Any]]
+    recommendations: List[str]
+    timestamp: str
+
+
+class RiskTrendResponse(BaseModel):
+    """Response containing risk trend forecast."""
+    entity_id: str
+    current_risk: float
+    predicted_risk: float
+    risk_trend: str
+    time_to_peak: Optional[str]
+    confidence: float
+    timestamp: str
+
+
+class CampaignPredictionResponse(BaseModel):
+    """Response containing campaign prediction."""
+    campaign_id: str
+    campaign_name: str
+    predicted_status: str
+    growth_rate: float
+    affected_entities: List[str]
+    peak_time: Optional[str]
+    confidence: float
+    timestamp: str
+
+
+class AttackPathResponse(BaseModel):
+    """Response containing attack path prediction."""
+    source_entity_id: str
+    predicted_path: List[str]
+    probability: float
+    estimated_damage: float
+    confidence: float
+    timestamp: str
+
+
+class RecommendationResponse(BaseModel):
+    """Response containing prevention recommendation."""
+    recommendation_id: str
+    entity_id: str
+    recommendation_type: str
+    priority: str
+    description: str
+    expected_impact: float
+    timestamp: str
+
+
+class PredictiveStatsResponse(BaseModel):
+    """Response containing predictive intelligence statistics."""
+    total_simulations: int
+    total_forecasts: int
+    total_campaigns: int
+    total_recommendations: int
+    current_scenarios: int
+    current_campaigns: int
+    processing_time_ms: float
+
+
+# =============================================================================
+# Multi-Agent SOC Schemas
+# =============================================================================
+
+class InvestigationRequestSchema(BaseModel):
+    """Request to initiate an investigation."""
+    entity_id: Optional[str] = None
+    case_id: Optional[str] = None
+    alert_ids: List[str] = []
+    priority: str = "MEDIUM"
+    context: Dict[str, Any] = {}
+
+
+class InvestigationResponse(BaseModel):
+    """Response containing investigation results."""
+    investigation_id: str
+    entity_id: str
+    status: str
+    risk_score: float
+    findings: List[Dict[str, Any]]
+    recommendations: List[str]
+    timestamp: str
+
+
+class ThreatAnalysisRequest(BaseModel):
+    """Request for threat intelligence analysis."""
+    threat_type: str
+    indicators: List[Dict[str, Any]] = []
+    affected_entities: List[str] = []
+
+
+class ThreatAnalysisResponse(BaseModel):
+    """Response containing threat intelligence report."""
+    report_id: str
+    threat_type: str
+    severity: str
+    confidence: float
+    ttps: List[str]
+    recommendations: List[str]
+    timestamp: str
+
+
+class ForensicAnalysisRequest(BaseModel):
+    """Request for forensic analysis."""
+    target_entity_id: str
+    analysis_type: str
+    evidence_types: List[str] = []
+
+
+class ForensicAnalysisResponse(BaseModel):
+    """Response containing forensic analysis."""
+    analysis_id: str
+    target_entity_id: str
+    analysis_type: str
+    conclusion: str
+    confidence: float
+    artifacts: List[Dict[str, Any]]
+    timestamp: str
+
+
+class FraudRingDetectionRequest(BaseModel):
+    """Request to detect a fraud ring."""
+    seed_entities: List[str]
+    ring_type: str = "unknown"
+
+
+class FraudRingResponse(BaseModel):
+    """Response containing fraud ring analysis."""
+    ring_id: str
+    ring_name: Optional[str]
+    member_count: int
+    ring_score: float
+    ring_type: str
+    financial_impact: float
+    confidence: float
+    timestamp: str
+
+
+class SOCReportRequest(BaseModel):
+    """Request to generate a SOC report."""
+    report_type: str
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+
+
+class SOCReportResponse(BaseModel):
+    """Response containing SOC report."""
+    report_id: str
+    report_type: str
+    period_start: str
+    period_end: str
+    metrics: Dict[str, float]
+    threats_identified: List[Dict[str, Any]]
+    recommendations: List[str]
+    generated_by: str
+    timestamp: str
+
+
+class OrchestrationRequest(BaseModel):
+    """Request to orchestrate a multi-agent workflow."""
+    workflow_name: str
+    tasks: List[Dict[str, Any]] = []
+    priority: str = "MEDIUM"
+
+
+class OrchestrationResponse(BaseModel):
+    """Response containing orchestration plan."""
+    plan_id: str
+    title: str
+    task_count: int
+    estimated_duration_seconds: int
+    status: str
+    timestamp: str
+
+
+class SOCDashboardResponse(BaseModel):
+    """Response containing SOC dashboard data."""
+    overview: Dict[str, Any]
+    trends: Dict[str, Any]
+    performance: Dict[str, Any]
+    alerts_by_severity: Dict[str, int]
+    timestamp: str
+
+
+class SOCStatsResponse(BaseModel):
+    """Response containing SOC statistics."""
+    total_agents: int
+    active_tasks: int
+    completed_tasks: int
+    investigations_stored: int
+    threat_reports_stored: int
+    fraud_rings_stored: int
+    reports_stored: int

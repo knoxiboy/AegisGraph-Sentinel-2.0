@@ -210,7 +210,7 @@ async def get_audit_log(
                 "id": "audit_1",
                 "action": "user.invited",
                 "actor": "admin@example.com",
-                "target": email,
+                "target": "admin@example.com",
                 "timestamp": datetime.utcnow().isoformat(),
                 "ip_address": "192.168.1.1",
             }

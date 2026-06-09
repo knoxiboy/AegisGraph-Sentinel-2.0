@@ -5,6 +5,7 @@ Bi-directional integration for SIEM correlation and alert management
 
 import json
 import httpx
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from dataclasses import dataclass

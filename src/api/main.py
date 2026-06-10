@@ -235,6 +235,7 @@ from .schemas import (
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     SessionAnalyzeRequest,
+    SessionAnalyzeResponse,
     PolicyResponse,
     # Autonomous SOAR Platform (Phase 35)
     IncidentCreateRequest,

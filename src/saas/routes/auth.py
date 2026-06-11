@@ -9,6 +9,7 @@ from fastapi.security import APIKeyHeader, OAuth2PasswordBearer, HTTPBearer
 from typing import Optional, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel, EmailStr, Field
+import secrets
 
 from src.config import settings
 from src.saas.auth.service import (

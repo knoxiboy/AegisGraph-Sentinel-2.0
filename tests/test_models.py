@@ -7,9 +7,6 @@ import os
 
 import pytest
 
-if os.getenv("RUN_TORCH_TESTS", "").lower() != "true":
-    pytest.skip("PyTorch tests require RUN_TORCH_TESTS=true", allow_module_level=True)
-
 # Handle optional torch dependency
 try:
     import torch

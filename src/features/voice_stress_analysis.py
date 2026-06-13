@@ -117,6 +117,9 @@ class VoiceStressAnalyzer:
         # Normalize
         audio = audio / (np.max(np.abs(audio)) + 1e-8)
 
+        # Apply noise reduction preprocessing step
+        audio = self.reduce_noise(audio, sr)
+
         audio_profile = self._prepare_audio_profile(audio, sr)
 
         # Extract features from shared precomputed audio statistics.
@@ -274,6 +277,42 @@ class VoiceStressAnalyzer:
             'snr_stress': snr_stress,
         }
     
+
+    def reduce_noise(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """Apply spectral subtraction noise reduction using librosa."""
+        if not AUDIO_LIBS_AVAILABLE or audio is None or audio.size == 0:
+            return audio
+        try:
+            import librosa
+            noise_len = min(int(0.25 * sr), len(audio))
+            if noise_len < 512:
+                return audio
+            
+            n_fft = 512
+            hop_length = n_fft // 4
+            
+            stft_signal = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
+            abs_signal = np.abs(stft_signal)
+            
+            stft_noise = librosa.stft(audio[:noise_len], n_fft=n_fft, hop_length=hop_length)
+            mean_noise = np.mean(np.abs(stft_noise), axis=1, keepdims=True)
+            
+            subtracted = abs_signal - 2.0 * mean_noise
+            subtracted = np.maximum(subtracted, 0.02 * abs_signal)
+            
+            phase = np.angle(stft_signal)
+            stft_clean = subtracted * np.exp(1j * phase)
+            clean_audio = librosa.istft(stft_clean, hop_length=hop_length)
+            
+            if len(clean_audio) > len(audio):
+                clean_audio = clean_audio[:len(audio)]
+            elif len(clean_audio) < len(audio):
+                clean_audio = np.pad(clean_audio, (0, len(audio) - len(clean_audio)))
+            return clean_audio
+        except Exception as e:
+            logger.error(f"Noise reduction failed: {e}")
+            return audio
+
     def _extract_pitch_features(
         self,
         audio: np.ndarray,

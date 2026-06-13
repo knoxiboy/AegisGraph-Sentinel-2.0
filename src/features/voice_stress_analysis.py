@@ -24,12 +24,13 @@ import warnings
 
 logger = logging.getLogger(__name__)
 
+librosa = None
 try:
-    import librosa
     import scipy.signal as signal
     from scipy import fft
-    AUDIO_LIBS_AVAILABLE = True
-except ImportError:
+    import importlib.util
+    AUDIO_LIBS_AVAILABLE = importlib.util.find_spec("librosa") is not None
+except Exception:
     AUDIO_LIBS_AVAILABLE = False
     warnings.warn("Audio analysis libraries not available. Install librosa for full functionality.")
 
@@ -145,6 +146,9 @@ class VoiceStressAnalyzer:
 
     def _prepare_audio_profile(self, audio: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
         """Precompute reusable clip statistics so feature extractors do one shared pass."""
+        global librosa
+        if librosa is None:
+            import librosa
         frame_length = max(int(0.03 * sr), 1)
         hop_length = max(frame_length // 2, 1)
 

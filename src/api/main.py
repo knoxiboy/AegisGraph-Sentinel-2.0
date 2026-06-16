@@ -6419,217 +6419,245 @@ async def get_simulation_results():
 
 
 # =============================================================================
-# Data Lineage & Provenance Platform (Phase 101)
+# Campaign Attribution Platform (Phase 102)
 # =============================================================================
-from src.data_lineage.service import get_lineage_service
-from src.data_lineage.models import RecordType, SourceType, TrustLevel, ImpactLevel
+from src.campaign_attribution.service import get_campaign_service
+from src.campaign_attribution.models import ActorType, CampaignStatus, ConfidenceLevel
 
 
 @app.post(
-    "/api/v1/lineage/records",
-    tags=["Data Lineage"],
-    summary="Create a new lineage record",
+    "/api/v1/campaigns",
+    tags=["Campaign Attribution"],
+    summary="Create a new campaign",
     dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def create_lineage_record(request: dict):
-    """Create a new data record with lineage tracking."""
-    from src.data_lineage.models import SourceAttribution
-
-    service = get_lineage_service()
-
-    try:
-        record_type = RecordType(request.get("record_type", "intelligence"))
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid record type")
-
-    source = None
-    if request.get("source"):
-        src_data = request["source"]
-        source = SourceAttribution(
-            source_id=src_data.get("source_id", ""),
-            source_type=SourceType(src_data.get("source_type", "internal_api")),
-            source_name=src_data.get("source_name", ""),
-            trust_level=TrustLevel(src_data.get("trust_level", "trusted")),
-        )
-
-    record = service.create_record(
-        record_type=record_type,
-        data=request.get("data", {}),
-        source=source,
-        created_by="api",
+async def create_campaign(request: dict):
+    """Create a new fraud campaign."""
+    service = get_campaign_service()
+    campaign = service.create_campaign(
+        name=request.get("name", ""),
+        description=request.get("description", ""),
+        target_sectors=request.get("target_sectors", []),
+        target_geographies=request.get("target_geographies", []),
+        attack_vectors=request.get("attack_vectors", []),
         tags=request.get("tags", []),
     )
-
-    return record.to_dict()
+    return campaign.to_dict()
 
 
 @app.get(
-    "/api/v1/lineage/records/{record_id}",
-    tags=["Data Lineage"],
-    summary="Get a lineage record",
+    "/api/v1/campaigns/{campaign_id}",
+    tags=["Campaign Attribution"],
+    summary="Get campaign by ID",
     dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def get_lineage_record(record_id: str):
-    """Get a data record by ID."""
-    service = get_lineage_service()
-    record = service._store.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail=f"Record not found: {record_id}")
-    return record.to_dict()
+async def get_campaign(campaign_id: str):
+    """Get a campaign by ID."""
+    service = get_campaign_service()
+    campaign = service._store.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign.to_dict()
 
 
 @app.post(
-    "/api/v1/lineage/records/{record_id}/link",
-    tags=["Data Lineage"],
-    summary="Link records in lineage",
+    "/api/v1/campaigns/{campaign_id}/attribute",
+    tags=["Campaign Attribution"],
+    summary="Attribute campaign to actor",
     dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def link_lineage_records(record_id: str, request: dict):
-    """Link two records with a lineage relationship."""
-    service = get_lineage_service()
+async def attribute_campaign(campaign_id: str, request: dict):
+    """Attribute a campaign to a threat actor."""
+    service = get_campaign_service()
 
     try:
-        impact_level = ImpactLevel(request.get("impact_level", "medium"))
+        confidence = ConfidenceLevel(request.get("confidence", "unknown"))
     except ValueError:
-        impact_level = ImpactLevel.MEDIUM
+        confidence = ConfidenceLevel.UNKNOWN
 
-    success = service.link_records(
-        parent_id=request.get("parent_id"),
-        child_id=record_id,
-        relationship_type=request.get("relationship_type", "derived_from"),
-        impact_level=impact_level,
+    attribution = service.attribute_campaign(
+        campaign_id=campaign_id,
+        actor_id=request.get("actor_id"),
+        confidence=confidence,
+        evidence=request.get("evidence", []),
+        method=request.get("method", "automated"),
     )
 
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to link records")
+    if not attribution:
+        raise HTTPException(status_code=400, detail="Failed to attribute campaign")
 
-    return {"status": "success", "message": "Records linked"}
-
-
-@app.get(
-    "/api/v1/lineage/records/{record_id}/provenance",
-    tags=["Data Lineage"],
-    summary="Get provenance chain",
-    dependencies=[Depends(require_role(Role.ANALYST))],
-)
-async def get_provenance_chain(record_id: str, max_depth: int = Query(default=10, ge=1, le=50)):
-    """Get the complete provenance chain for a record."""
-    service = get_lineage_service()
-    chain = service.get_provenance_chain(record_id, max_depth=max_depth)
-    if not chain:
-        raise HTTPException(status_code=404, detail=f"Record not found: {record_id}")
-    return chain.to_dict()
+    return attribution.to_dict()
 
 
 @app.get(
-    "/api/v1/lineage/records/{record_id}/graph",
-    tags=["Data Lineage"],
-    summary="Get dependency graph",
+    "/api/v1/campaigns/{campaign_id}/profile",
+    tags=["Campaign Attribution"],
+    summary="Get threat profile",
     dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def get_dependency_graph(
-    record_id: str,
-    max_depth: int = Query(default=10, ge=1, le=50),
-    direction: str = Query(default="downstream", regex="^(downstream|upstream)$"),
+async def get_threat_profile(campaign_id: str):
+    """Generate and get threat profile."""
+    service = get_campaign_service()
+    profile = service.generate_threat_profile("campaign", campaign_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return profile.to_dict()
+
+
+@app.get(
+    "/api/v1/campaigns/{campaign_id}/risk",
+    tags=["Campaign Attribution"],
+    summary="Get risk assessment",
+    dependencies=[Depends(require_role(Role.ANALYST))],
+)
+async def get_risk_assessment(campaign_id: str):
+    """Get risk assessment for a campaign."""
+    service = get_campaign_service()
+    assessment = service.assess_risk("campaign", campaign_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return assessment.to_dict()
+
+
+@app.post(
+    "/api/v1/actors",
+    tags=["Campaign Attribution"],
+    summary="Create a threat actor",
+    dependencies=[Depends(require_role(Role.ANALYST))],
+)
+async def create_actor(request: dict):
+    """Create a new threat actor."""
+    service = get_campaign_service()
+
+    try:
+        actor_type = ActorType(request.get("actor_type", "unknown"))
+    except ValueError:
+        actor_type = ActorType.UNKNOWN
+
+    actor = service.create_actor(
+        name=request.get("name", ""),
+        actor_type=actor_type,
+        description=request.get("description", ""),
+        motivation=request.get("motivation", []),
+        capabilities=request.get("capabilities", []),
+        tags=request.get("tags", []),
+    )
+    return actor.to_dict()
+
+
+@app.get(
+    "/api/v1/actors/{actor_id}",
+    tags=["Campaign Attribution"],
+    summary="Get actor by ID",
+    dependencies=[Depends(require_role(Role.ANALYST))],
+)
+async def get_actor(actor_id: str):
+    """Get a threat actor by ID."""
+    service = get_campaign_service()
+    actor = service._store.get_actor(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail="Actor not found")
+    return actor.to_dict()
+
+
+@app.get(
+    "/api/v1/actors/{actor_id}/profile",
+    tags=["Campaign Attribution"],
+    summary="Get actor threat profile",
+    dependencies=[Depends(require_role(Role.ANALYST))],
+)
+async def get_actor_profile(actor_id: str):
+    """Generate and get actor threat profile."""
+    service = get_campaign_service()
+    profile = service.generate_threat_profile("actor", actor_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Actor not found")
+    return profile.to_dict()
+
+
+@app.get(
+    "/api/v1/campaigns",
+    tags=["Campaign Attribution"],
+    summary="Search campaigns",
+    dependencies=[Depends(require_role(Role.ANALYST))],
+)
+async def search_campaigns(
+    status: Optional[str] = Query(default=None),
+    sector: Optional[str] = Query(default=None),
 ):
-    """Build and return a dependency graph."""
-    service = get_lineage_service()
-    graph = service.build_dependency_graph(record_id, max_depth=max_depth, direction=direction)
-    if not graph:
-        raise HTTPException(status_code=404, detail=f"Record not found: {record_id}")
-    return graph.to_dict()
+    """Search campaigns by criteria."""
+    service = get_campaign_service()
+
+    campaign_status = None
+    if status:
+        try:
+            campaign_status = CampaignStatus(status)
+        except ValueError:
+            pass
+
+    campaigns = service.search_campaigns(status=campaign_status, sector=sector)
+    return [c.to_dict() for c in campaigns]
 
 
 @app.get(
-    "/api/v1/lineage/records/{record_id}/impact",
-    tags=["Data Lineage"],
-    summary="Get impact analysis",
+    "/api/v1/actors",
+    tags=["Campaign Attribution"],
+    summary="Search actors",
     dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def get_impact_analysis(record_id: str, max_depth: int = Query(default=10, ge=1, le=50)):
-    """Analyze the impact of a data record."""
-    service = get_lineage_service()
-    analysis = service.analyze_impact(record_id, max_depth=max_depth)
-    if not analysis:
-        raise HTTPException(status_code=404, detail=f"Record not found: {record_id}")
-    return analysis.to_dict()
-
-
-@app.get(
-    "/api/v1/lineage/records/{record_id}/history",
-    tags=["Data Lineage"],
-    summary="Get record history",
-    dependencies=[Depends(require_role(Role.ANALYST))],
-)
-async def get_record_history(record_id: str):
-    """Get the complete traceability history for a record."""
-    service = get_lineage_service()
-    history = service.get_record_history(record_id)
-    if not history:
-        raise HTTPException(status_code=404, detail=f"Record not found: {record_id}")
-    return [h.to_dict() for h in history]
-
-
-@app.get(
-    "/api/v1/lineage/records/{record_id}/verify",
-    tags=["Data Lineage"],
-    summary="Verify provenance integrity",
-    dependencies=[Depends(require_role(Role.ANALYST))],
-)
-async def verify_provenance(record_id: str):
-    """Verify the provenance chain integrity."""
-    service = get_lineage_service()
-    is_valid = service.verify_provenance(record_id)
-    return {"record_id": record_id, "is_valid": is_valid, "verified_at": datetime.now(timezone.utc).isoformat()}
-
-
-@app.get(
-    "/api/v1/lineage/records/{record_id}/report",
-    tags=["Data Lineage"],
-    summary="Get lineage report",
-    dependencies=[Depends(require_role(Role.ANALYST))],
-)
-async def get_lineage_report(
-    record_id: str,
-    include_graph: bool = Query(default=True),
-    include_impact: bool = Query(default=True),
+async def search_actors(
+    actor_type: Optional[str] = Query(default=None),
+    is_active: Optional[bool] = Query(default=None),
 ):
-    """Export a comprehensive lineage report."""
-    service = get_lineage_service()
-    report = service.export_lineage_report(record_id, include_graph=include_graph, include_impact=include_impact)
-    if "error" in report:
-        raise HTTPException(status_code=404, detail=report["error"])
-    return report
+    """Search actors by criteria."""
+    service = get_campaign_service()
+
+    act_type = None
+    if actor_type:
+        try:
+            act_type = ActorType(actor_type)
+        except ValueError:
+            pass
+
+    actors = service.search_actors(actor_type=act_type, is_active=is_active)
+    return [a.to_dict() for a in actors]
 
 
 @app.get(
-    "/api/v1/lineage/stats",
-    tags=["Data Lineage"],
-    summary="Get lineage statistics",
+    "/api/v1/campaigns/stats",
+    tags=["Campaign Attribution"],
+    summary="Get campaign statistics",
     dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def get_lineage_stats():
-    """Get lineage system statistics."""
-    service = get_lineage_service()
-    stats = service.get_lineage_stats()
+async def get_campaign_stats():
+    """Get campaign attribution statistics."""
+    service = get_campaign_service()
+    stats = service.get_campaign_statistics()
     return stats.to_dict()
 
 
-@app.delete(
-    "/api/v1/lineage/records/{record_id}",
-    tags=["Data Lineage"],
-    summary="Delete a lineage record",
-    dependencies=[Depends(require_role(Role.ADMIN))],
+@app.post(
+    "/api/v1/campaigns/correlate",
+    tags=["Campaign Attribution"],
+    summary="Correlate campaigns",
+    dependencies=[Depends(require_role(Role.ANALYST))],
 )
-async def delete_lineage_record(record_id: str):
-    """Delete a lineage record (soft delete)."""
-    service = get_lineage_service()
-    record = service._store.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail=f"Record not found: {record_id}")
+async def correlate_campaigns(request: dict):
+    """Correlate multiple campaigns."""
+    service = get_campaign_service()
+    campaign_ids = request.get("campaign_ids", [])
+    return service.correlate_campaigns(campaign_ids)
 
-    record.is_active = False
-    record.updated_at = datetime.now(timezone.utc).isoformat()
-    service._store.store_record(record)
 
-    return {"status": "success", "message": "Record deleted"}
+@app.get(
+    "/api/v1/campaigns/discover",
+    tags=["Campaign Attribution"],
+    summary="Discover campaigns by indicators",
+    dependencies=[Depends(require_role(Role.ANALYST))],
+)
+async def discover_campaigns(indicators: str = Query(..., description="Comma-separated indicators")):
+    """Discover campaigns by indicators."""
+    service = get_campaign_service()
+    indicator_list = [i.strip() for i in indicators.split(",")]
+    campaigns = service.discover_campaign(indicator_list)
+    return [c.to_dict() for c in campaigns]

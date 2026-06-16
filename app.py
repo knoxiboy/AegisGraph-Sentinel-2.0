@@ -133,7 +133,7 @@ def _estimate_csv_rows(uploaded_file) -> int:
     uploaded_file.seek(0)
     total_rows = 0
     for i in range(0, len(st.session_state["batch_df"]), BATCH_CHUNK_SIZE):
-                    chunk = st.session_state["batch_df"].iloc[i:i+BATCH_CHUNK_SIZE]
+        chunk = st.session_state["batch_df"].iloc[i:i+BATCH_CHUNK_SIZE]
         total_rows += len(chunk)
         if total_rows >= BATCH_MAX_ROWS:
             break

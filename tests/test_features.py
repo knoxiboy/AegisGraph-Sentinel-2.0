@@ -339,7 +339,7 @@ class TestFeatureIntegration:
         """Test multi-feature entropy reuse avoids repeated neighborhood walks."""
         calculator = GraphEntropyCalculator()
         # Mock graph with is_directed method
-        sentinel_graph = type('MockGraph', (), {'is_directed': lambda: False})()
+        sentinel_graph = type('MockGraph', (), {'is_directed': lambda self: False})()
         build_calls = []
         profile = {
             'direct_neighbors': {'B', 'C'},

@@ -1153,6 +1153,7 @@ elif page == "📁 Batch Triage":
             if st.button("Process All Transactions", use_container_width=True):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                error_placeholder = st.empty()
 
                 results = []
                 processed_rows = 0
@@ -1164,10 +1165,6 @@ elif page == "📁 Batch Triage":
                     for _, row in chunk.iterrows():
                         if processed_rows >= BATCH_MAX_ROWS:
                             break
-
-                        status_text.text(
-                            f"Processing {processed_rows + 1}/{total_rows}..."
-                        )
 
                         txn = _build_batch_transaction(row, processed_rows)
 
@@ -1205,7 +1202,7 @@ elif page == "📁 Batch Triage":
                                     }
                                 )
                             else:
-                                st.error(
+                                error_placeholder.error(
                                     f"API Error for {txn['transaction_id']}: Status {response.status_code}"
                                 )
                                 results.append(
@@ -1223,7 +1220,7 @@ elif page == "📁 Batch Triage":
                                     }
                                 )
                         except Exception as e:
-                            st.error(
+                            error_placeholder.error(
                                 f"Error processing {txn.get('transaction_id', 'unknown')}: {str(e)}"
                             )
                             results.append(
@@ -1244,7 +1241,9 @@ elif page == "📁 Batch Triage":
                             )
 
                         processed_rows += 1
-                        progress_bar.progress(min(processed_rows / total_rows, 1.0))
+
+                    progress_bar.progress(min(processed_rows / total_rows, 1.0))
+                    status_text.text(f"Processing {processed_rows}/{total_rows}...")
 
                     if processed_rows >= BATCH_MAX_ROWS:
                         break

@@ -563,17 +563,16 @@ def compute_risk_score(
     lateral_movement_reason = ""
     
     if graph_loaded and transaction_graph:
-        if hasattr(transaction_graph, "is_active") and transaction_graph.is_active:
-            G = transaction_graph.get_approx_subgraph(source_account, max_hops=2)
-            has_node = G.has_node(source_account)
-        else:
-            G = transaction_graph
-            has_node = source_account in G.nodes if hasattr(G, "nodes") else False
+        has_node = (
+            graph_view.has_node(source_account)
+            if hasattr(graph_view, "has_node")
+            else source_account in graph_view.nodes
+        )
 
         if has_node:
             try:
                 if centrality is None:
-                    centrality = _get_betweenness_centrality(G)
+                    centrality = _get_betweenness_centrality(graph_view)
                 if source_account in centrality:
                     current_score = centrality[source_account]
                     

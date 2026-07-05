@@ -94,6 +94,73 @@ except ImportError as e:
     )
 
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import JSONResponse
+
+class DefaultRateLimitMiddleware(BaseHTTPMiddleware):
+    """Middleware to enforce default rate limits on standard API endpoints."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Only rate limit if slowapi is available and limiter is configured
+        limiter = getattr(request.app.state, "limiter", None)
+        if not SLOWAPI_AVAILABLE or not limiter:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Standard API routes start with /api/ or equal /stats, excluding health, metrics, docs, etc.
+        exempt_paths = {
+            "/",
+            "/health",
+            "/health/liveness",
+            "/api/v1/health",
+            "/metrics",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+        }
+
+        is_standard_route = path.startswith("/api/") or path == "/stats"
+        is_exempt = path in exempt_paths
+
+        if is_standard_route and not is_exempt:
+            try:
+                import limits
+                # Securely get client IP
+                client_ip = get_remote_address(request)
+
+                # Get the default rate limit string from settings
+                runtime_settings = get_settings()
+                rate_limit_str = runtime_settings.api.rate_limit
+
+                # Parse the limit using limits library
+                parsed_limit = limits.parse(rate_limit_str)
+
+                # Check rate limit using the default key_func (IP address)
+                # Use 'default_limit' namespace prefix to isolate state from other decorators
+                allowed = limiter.limiter.hit(parsed_limit, client_ip, "default_limit")
+
+                if not allowed:
+                    # Get reset time to calculate Retry-After header
+                    stats = limiter.limiter.get_window_stats(parsed_limit, client_ip, "default_limit")
+                    retry_after = max(1, int(stats.reset_time - time.time()))
+
+                    return JSONResponse(
+                        status_code=429,
+                        content={
+                            "error": {
+                                "code": 429,
+                                "message": f"Rate limit exceeded: {rate_limit_str}. Please try again later."
+                            }
+                        },
+                        headers={"Retry-After": str(retry_after)}
+                    )
+            except Exception as exc:
+                # Log error and continue to ensure availability if rate limiter logic fails
+                logger.error(f"Error in rate limiting middleware: {exc}", exc_info=True)
+
+        return await call_next(request)
+
 
 from ..config.settings import get_settings
 from ..config.validation import validate_environment
@@ -1661,12 +1728,13 @@ app.add_middleware(
 # Rate Limiting
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=["100/minute"],
+    default_limits=[],
 )
 app.state.limiter = limiter
 if SLOWAPI_AVAILABLE:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(DefaultRateLimitMiddleware)
 
 register_exception_handlers(app)
 register_observability_middleware(app)

@@ -15,10 +15,8 @@ def test_prometheus_metrics_authenticated_with_token_configured(monkeypatch):
     test_token = "secret123"
     token_hash = hashlib.sha256(test_token.encode()).hexdigest()
     
-    # We must patch the loaded variable, not just os.environ, because
-    # _METRICS_TOKEN_HASH is loaded at module import time in main.py
-    import src.api.main as main_module
-    monkeypatch.setattr(main_module, "_METRICS_TOKEN_HASH", token_hash)
+    # We set the environment variable so os.getenv reads it dynamically
+    monkeypatch.setenv("AEGIS_METRICS_SCRAPE_TOKEN_HASH", token_hash)
     
     client = TestClient(app)
     

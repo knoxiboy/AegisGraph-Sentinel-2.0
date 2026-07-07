@@ -368,6 +368,43 @@ class RiskScorer:
         return confidence
 
 
+_CACHED_SCORER: Optional[CentralRiskScorer] = None
+_CACHED_SCORER_LOCK = Lock()
+
+def _get_central_scorer(config: dict) -> CentralRiskScorer:
+    global _CACHED_SCORER
+    if _CACHED_SCORER is None:
+        with _CACHED_SCORER_LOCK:
+            if _CACHED_SCORER is None:
+                rs = config.get('risk_scoring', {})
+                caller_thresholds = rs.get('thresholds', {})
+                thresholds = {
+                    'allow': caller_thresholds.get('allow', config_defaults.DEFAULT_RISK_THRESHOLDS["allow"]),
+                    'review': caller_thresholds.get('review', config_defaults.DEFAULT_RISK_THRESHOLDS["review"]),
+                    'block': caller_thresholds.get('block', config_defaults.DEFAULT_RISK_THRESHOLDS["block"]),
+                }
+
+                caller_weights = rs.get('weights', {})
+                component_weights = {
+                    'graph': caller_weights.get('graph', config_defaults.DEFAULT_COMPONENT_WEIGHTS["graph"]),
+                    'velocity': caller_weights.get('velocity', config_defaults.DEFAULT_COMPONENT_WEIGHTS["velocity"]),
+                    'behavior': caller_weights.get('behavior', config_defaults.DEFAULT_COMPONENT_WEIGHTS["behavior"]),
+                    'entropy': caller_weights.get('entropy', config_defaults.DEFAULT_COMPONENT_WEIGHTS["entropy"]),
+                }
+
+                central_thresholds = ThresholdConfig(thresholds=thresholds)
+                _CACHED_SCORER = CentralRiskScorer(
+                    threshold_config=central_thresholds,
+                    component_weights=component_weights,
+                )
+    return _CACHED_SCORER
+
+def invalidate_scorer_cache():
+    global _CACHED_SCORER
+    with _CACHED_SCORER_LOCK:
+        _CACHED_SCORER = None
+
+
 def compute_risk_score(
     transaction: dict,
     biometrics: Optional[dict] = None,
@@ -707,27 +744,7 @@ def compute_risk_score(
     entropy_risk = min(entropy_risk, 1.0)
     breakdown['entropy'] = entropy_risk
 
-    rs = config.get('risk_scoring', {})
-    caller_thresholds = rs.get('thresholds', {})
-    thresholds = {
-        'allow': caller_thresholds.get('allow', config_defaults.DEFAULT_RISK_THRESHOLDS["allow"]),
-        'review': caller_thresholds.get('review', config_defaults.DEFAULT_RISK_THRESHOLDS["review"]),
-        'block': caller_thresholds.get('block', config_defaults.DEFAULT_RISK_THRESHOLDS["block"]),
-    }
-
-    caller_weights = rs.get('weights', {})
-    component_weights = {
-        'graph': caller_weights.get('graph', config_defaults.DEFAULT_COMPONENT_WEIGHTS["graph"]),
-        'velocity': caller_weights.get('velocity', config_defaults.DEFAULT_COMPONENT_WEIGHTS["velocity"]),
-        'behavior': caller_weights.get('behavior', config_defaults.DEFAULT_COMPONENT_WEIGHTS["behavior"]),
-        'entropy': caller_weights.get('entropy', config_defaults.DEFAULT_COMPONENT_WEIGHTS["entropy"]),
-    }
-
-    central_thresholds = ThresholdConfig(thresholds=thresholds)
-    central_scorer = CentralRiskScorer(
-        threshold_config=central_thresholds,
-        component_weights=component_weights,
-    )
+    central_scorer = _get_central_scorer(config)
     assessment = central_scorer.assess(breakdown)
     
     return {

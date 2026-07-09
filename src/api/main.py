@@ -1910,7 +1910,7 @@ def _analyze_keystrokes_sync(biometrics: dict) -> bool:
     tags=["Detection"],
     summary="Check transaction for fraud",
     description="Analyze a single transaction for fraud risk using HTGNN and behavioral biometrics",
-    dependencies=[Depends(require_role(Role.ANALYST)), Depends(StrictRateLimit(ip_limit=60, api_key_limit=300))]
+    dependencies=[Depends(StrictRateLimit(ip_limit=60, api_key_limit=300)), Depends(require_role(Role.ANALYST))]
 )
 async def check_transaction(
     request: TransactionCheckRequest,
@@ -2440,7 +2440,7 @@ async def fraud_stream_websocket(websocket: WebSocket, client_id: str):
     tags=["Detection"],
     summary="Check multiple transactions",
     description="Batch processing of multiple transactions for fraud detection",
-    dependencies=[Depends(require_role(Role.ANALYST)), Depends(StrictRateLimit(ip_limit=10, api_key_limit=50))]
+    dependencies=[Depends(StrictRateLimit(ip_limit=10, api_key_limit=50)), Depends(require_role(Role.ANALYST))]
 )
 async def check_batch_transactions(request: BatchTransactionRequest):
     """
@@ -2581,7 +2581,7 @@ async def get_model_info():
     tags=["Detection"],
     summary="Analyze voice stress during transaction",
     description="Innovation 5: Real-time voice stress analysis to detect coercion or AI generation",
-    dependencies=[Depends(require_role(Role.ANALYST)), Depends(StrictRateLimit(ip_limit=5, api_key_limit=20))]
+    dependencies=[Depends(StrictRateLimit(ip_limit=5, api_key_limit=20)), Depends(require_role(Role.ANALYST))]
 )
 @limiter.limit("10/minute")
 async def analyze_voice(

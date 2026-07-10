@@ -88,13 +88,18 @@ class VelocityCalculator:
         if len(transactions) < 2:
             return 0.0
         
+        # Sort transactions chronologically to handle out-of-order streams
+        sorted_txs = sorted(transactions, key=lambda t: t.timestamp)
+        
         energy = 0.0
-        for i in range(len(transactions) - 1):
-            delta_amount = transactions[i + 1].amount - transactions[i].amount
-            delta_time = transactions[i + 1].timestamp - transactions[i].timestamp
+        for i in range(len(sorted_txs) - 1):
+            amount = sorted_txs[i + 1].amount
+            delta_time = sorted_txs[i + 1].timestamp - sorted_txs[i].timestamp
 
             if delta_time > 0:
-                energy += (delta_amount ** 2) / delta_time
+                # Use absolute amount to ensure identical rapid transfers
+                # (typical mule behavior) spike the energy score.
+                energy += (amount ** 2) / delta_time
         
         return energy
     

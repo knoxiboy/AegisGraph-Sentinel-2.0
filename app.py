@@ -32,6 +32,7 @@ import plotly.graph_objects as go
 import requests
 from plotly.subplots import make_subplots
 
+from config.security import is_admin_role
 from src.inference.model_comparison import build_model_explanation_comparison
 from src.timeline.doubly_linked_list import DoublyLinkedList
 from utils.webhook_alerts import trigger_webhook_alert
@@ -50,6 +51,41 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Initialize session state for login
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "role" not in st.session_state:
+    st.session_state.role = None
+
+if not st.session_state.logged_in:
+    st.title("🛡️ AegisGraph Sentinel 2.0 Login")
+    st.markdown("Please authenticate to access the security command center.")
+
+    role_choice = st.selectbox("Select Your Role", ["Operator", "Administrator"])
+
+    # Display credential hint for testing
+    password_hint = (
+        "sentinel-operator" if role_choice == "Operator" else "sentinel-admin"
+    )
+    st.caption(f"Password hint for testing: `{password_hint}`")
+
+    password = st.text_input("Enter Password", type="password")
+
+    if st.button("Authenticate"):
+        if role_choice == "Operator" and password == "sentinel-operator":
+            st.session_state.logged_in = True
+            st.session_state.role = "Operator"
+            st.success("Authenticated as Operator!")
+            st.rerun()
+        elif role_choice == "Administrator" and password == "sentinel-admin":
+            st.session_state.logged_in = True
+            st.session_state.role = "Administrator"
+            st.success("Authenticated as Administrator!")
+            st.rerun()
+        else:
+            st.error("Invalid password. Please check the hint.")
+    st.stop()
 
 # API Configuration
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
@@ -695,6 +731,18 @@ st.markdown("---")
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/000000/security-checked.png", width=100)
     st.title("Navigation")
+
+    role_label = st.session_state.role
+    if is_admin_role(role_label):
+        st.sidebar.success("🔓 Administrator Mode")
+    else:
+        st.sidebar.warning("🔒 Operator (Read-Only) Mode")
+
+    if st.sidebar.button("Logout", key="logout_btn", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.role = None
+        st.rerun()
+
     page = st.radio(
         "Select Page",
         [
@@ -2446,6 +2494,10 @@ elif page == "📊 Risk Analytics":
 
 # Page: Innovations
 elif page == "🧪 Innovation Lab":
+    if not is_admin_role(st.session_state.role):
+        st.warning(
+            "🔒 Read-Only (Operator Mode): Model configuration and retraining parameters are view-only."
+        )
     # Sub-page: Honeypot Escrow
     if innovation_page == "🍯 Honeypot Escrow":
         st.header("🍯 Honeypot Escrow - Deceptive Containment System")

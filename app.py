@@ -22,6 +22,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+from config.sanitizer import sanitize_query_input
 from datetime import datetime
 from datetime import timezone
 import time
@@ -3206,9 +3207,10 @@ elif page == "🕸️ Network Graph Explorer":
     # Interactivity settings panel
     col_p1, col_p2, col_p3 = st.columns([1.5, 1, 1.5])
     with col_p1:
-        search_query = st.text_input(
+        raw_search_query = st.text_input(
             "🔍 Search Account ID (e.g. ACC_VICTIM_3)", value="", key="graph_search_box"
         )
+        search_query = sanitize_query_input(raw_search_query)
     with col_p2:
         physics_enabled = st.toggle(
             "🔒 Dynamic Spring Physics", value=True, key="graph_physics_toggle"
